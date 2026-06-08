@@ -232,12 +232,6 @@ def _show_rectification(cal_path: str) -> None:
     Load calibration and show a live rectified preview with horizontal
     epipolar lines so you can verify the cameras are properly aligned.
     """
-    try:
-        from picamera2 import Picamera2
-    except ImportError:
-        print("picamera2 not available for live verify; pass --images instead.")
-        return
-
     data = np.load(cal_path)
     K0, D0 = data["K0"], data["D0"]
     K1, D1 = data["K1"], data["D1"]
@@ -249,20 +243,21 @@ def _show_rectification(cal_path: str) -> None:
     map0x, map0y = cv2.initUndistortRectifyMap(K0, D0, R0, P0, img_size, cv2.CV_32FC1)
     map1x, map1y = cv2.initUndistortRectifyMap(K1, D1, R1, P1, img_size, cv2.CV_32FC1)
 
-    cam0 = Picamera2(config.CAM0_IDX)
-    cam1 = Picamera2(config.CAM1_IDX)
-    cfg = {"format": "BGR888", "size": img_size}
-    for cam in (cam0, cam1):
-        cam.configure(cam.create_video_configuration(main=cfg))
-        cam.start()
+    cap0 = cv2.VideoCapture(config.CAM0_IDX, config.CAMERA_BACKEND)
+    cap1 = cv2.VideoCapture(config.CAM1_IDX, config.CAMERA_BACKEND)
+    for cap in (cap0, cap1):
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  img_size[0])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, img_size[1])
 
     print(f"Calibration RMS: {rms:.4f} px")
     print("Showing rectified view. Horizontal lines should pass through matching features.")
     print("Press ESC to exit.")
 
     while True:
-        fl = cam0.capture_array("main")
-        fr = cam1.capture_array("main")
+        ok0, fl = cap0.read()
+        ok1, fr = cap1.read()
+        if not ok0 or not ok1:
+            continue
 
         rl = cv2.remap(fl, map0x, map0y, cv2.INTER_LINEAR)
         rr = cv2.remap(fr, map1x, map1y, cv2.INTER_LINEAR)
@@ -280,28 +275,27 @@ def _show_rectification(cal_path: str) -> None:
             break
 
     cv2.destroyAllWindows()
-    cam0.stop()
-    cam1.stop()
+    cap0.release()
+    cap1.release()
 
 
 # ── Live capture session ──────────────────────────────────────────────────────
 
 def calibrate_live(target: int, out_path: str) -> None:
-    try:
-        from picamera2 import Picamera2
-    except ImportError:
-        print("picamera2 not installed — cannot run live calibration.")
-        sys.exit(1)
-
     board, aruco_dict = _make_board()
-    cam0 = Picamera2(config.CAM0_IDX)
-    cam1 = Picamera2(config.CAM1_IDX)
 
     img_size = (config.WIDTH, config.HEIGHT)
-    cfg = {"format": "BGR888", "size": img_size}
-    for cam in (cam0, cam1):
-        cam.configure(cam.create_video_configuration(main=cfg))
-        cam.start()
+    cap0 = cv2.VideoCapture(config.CAM0_IDX, config.CAMERA_BACKEND)
+    cap1 = cv2.VideoCapture(config.CAM1_IDX, config.CAMERA_BACKEND)
+    for cap in (cap0, cap1):
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  img_size[0])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, img_size[1])
+        cap.set(cv2.CAP_PROP_FPS,          float(config.FRAMERATE))
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+        cap.set(cv2.CAP_PROP_EXPOSURE, float(config.EXPOSURE_VALUE))
+    if not cap0.isOpened() or not cap1.isOpened():
+        print("Cannot open one or both cameras. Run camera_check.py to diagnose.")
+        sys.exit(1)
 
     save_dir = Path("calib_images")
     save_dir.mkdir(exist_ok=True)
@@ -319,8 +313,10 @@ def calibrate_live(target: int, out_path: str) -> None:
     print(f"Target: {target} pairs  |  SPACE=capture  A=auto  ESC=done")
 
     while True:
-        fl = cam0.capture_array("main")
-        fr = cam1.capture_array("main")
+        ok0, fl = cap0.read()
+        ok1, fr = cap1.read()
+        if not ok0 or not ok1:
+            continue
 
         gl = cv2.cvtColor(fl, cv2.COLOR_BGR2GRAY)
         gr = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
@@ -417,8 +413,8 @@ def calibrate_live(target: int, out_path: str) -> None:
                 break
 
     cv2.destroyAllWindows()
-    cam0.stop()
-    cam1.stop()
+    cap0.release()
+    cap1.release()
 
     if len(obj_pts_all) < MIN_PAIRS:
         print(f"Only {len(obj_pts_all)} pairs captured (need {MIN_PAIRS}). Aborting.")

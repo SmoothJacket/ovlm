@@ -11,10 +11,11 @@ Public API used by the server for live streaming:
   trigger.set_threshold(v) — update threshold without restart
 """
 
-import audioop
 import threading
 import time
 from typing import Callable, Optional
+
+import numpy as np
 
 import config
 
@@ -97,10 +98,11 @@ class AudioTrigger:
 
     # ── Capture loop ──────────────────────────────────────────────────────────
     def _loop(self) -> None:
-        max_int16 = 32768.0
+        max_int16 = 32768.0  # noqa: F841 — used in rms calculation below
         while self._running:
-            data = self._stream.read(config.AUDIO_CHUNK, exception_on_overflow=False)
-            rms = audioop.rms(data, 2) / max_int16
+            data    = self._stream.read(config.AUDIO_CHUNK, exception_on_overflow=False)
+            samples = np.frombuffer(data, dtype=np.int16)
+            rms     = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))) / max_int16
 
             with self._lock:
                 self._rms  = rms

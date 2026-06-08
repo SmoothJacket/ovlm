@@ -1,6 +1,6 @@
 """
 OVLM — Open Vision Launch Monitor
-Entry point for the Raspberry Pi 5 pipeline.
+Entry point for the Windows NUC pipeline.
 
 Usage:
     python main.py [--no-audio] [--debug]
@@ -22,7 +22,7 @@ from server import PipelineServer
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OVLM Pi pipeline")
+    parser = argparse.ArgumentParser(description="OVLM NUC pipeline")
     parser.add_argument("--no-audio", action="store_true",
                         help="Disable mic trigger (manual arm via browser)")
     parser.add_argument("--radar", action="store_true",
@@ -84,7 +84,7 @@ def main() -> None:
         def _radar_trigger(pt) -> None:
             if armed:
                 log.info("Radar trigger at %.1f mph", abs(pt.vel) * 2.23694)
-                buffer.trigger(pt.vel)   # timestamp not needed — buffer uses monotonic internally
+                buffer.trigger(pt.vel)
         radar.set_trigger_callback(_radar_trigger)
 
     def set_threshold(value: float) -> None:
@@ -97,18 +97,23 @@ def main() -> None:
     log.info("Starting stereo capture …")
     capturer.start()
 
-    log.info("Ready. Connect browser to ws://<pi-ip>:%d", config.WS_PORT)
+    log.info("Ready. Connect browser to ws://localhost:%d", config.WS_PORT)
     server.broadcast({"type": "status", "state": "idle"})
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    def _shutdown(sig_name: str) -> None:
+    def _shutdown(sig_name: str = "shutdown") -> None:
         log.info("Received %s — shutting down …", sig_name)
         loop.stop()
 
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda s=sig: _shutdown(signal.Signals(s).name))
+    # asyncio.loop.add_signal_handler is Unix-only; use signal.signal on Windows
+    if sys.platform == "win32":
+        signal.signal(signal.SIGINT,
+                      lambda sig, frame: loop.call_soon_threadsafe(loop.stop))
+    else:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, lambda s=sig: _shutdown(signal.Signals(s).name))
 
     async def _run() -> None:
         await asyncio.gather(
