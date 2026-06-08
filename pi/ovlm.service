@@ -1,0 +1,38 @@
+[Unit]
+Description=OVLM — Open Vision Launch Monitor
+# Wait for network so WebSocket clients can connect
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+
+# Adjust this path if you cloned somewhere else
+WorkingDirectory=/home/pi/ovlm/pi
+ExecStart=/home/pi/ovlm-venv/bin/python main.py
+
+# Restart automatically on any non-zero exit
+Restart=always
+RestartSec=3
+
+# Give the cameras time to initialise after a crash restart
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Log to journald — view with: journalctl -u ovlm -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ovlm
+
+# picamera2 needs access to /dev/video* and /dev/dma_heap/*
+# The pi user should already be in the video group on Raspberry Pi OS.
+# If not: sudo usermod -aG video pi
+SupplementaryGroups=video render
+
+# Clean environment — pass only what's needed
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

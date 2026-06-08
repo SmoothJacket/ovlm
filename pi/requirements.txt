@@ -1,0 +1,6 @@
+picamera2
+opencv-python
+numpy
+websockets
+pyaudio
+pyserial
