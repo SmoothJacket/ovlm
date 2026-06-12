@@ -4,6 +4,9 @@ import type { SwingSession } from '@/types/pipeline';
 import { BiomechPanel } from './BiomechPanel';
 import { EVChart } from './EVChart';
 import { SprayChart } from './SprayChart';
+import {
+  openSimulator, sendSwingToSimulator, getAutoSend, setAutoSend,
+} from '@/integrations/simulator';
 
 function exportCsv(swings: SwingSession[]): void {
   const header = [
@@ -54,6 +57,7 @@ export function MetricsDashboard(): React.ReactElement {
   const recompute = useStore((s) => s.recomputeAggregates);
   const settings = useStore((s) => s.settings);
   const { evUnit, laOptimalMin, laOptimalMax } = settings;
+  const [autoSend, setAutoSendState] = React.useState(getAutoSend());
 
   const handleToggle = (id: string) => {
     toggleSwing(id);
@@ -125,11 +129,27 @@ export function MetricsDashboard(): React.ReactElement {
           </div>
         )}
 
-        {/* Export */}
+        {/* Export + simulator */}
         <div style={styles.exportRow}>
           <button style={styles.exportBtn} onClick={() => exportCsv(swings)}>
             ↓ Export CSV
           </button>
+          <button
+            style={{ ...styles.exportBtn, marginTop: 6, color: '#cc8844', borderColor: '#2a1f10' }}
+            title="Replay the selected swing's ball flight in the MLB stadium simulator"
+            onClick={() => (activeSwing ? sendSwingToSimulator(activeSwing.ball) : openSimulator())}
+          >
+            ⚾ {activeSwing ? 'Replay in Simulator' : 'Open Simulator'}
+          </button>
+          <label style={styles.autoSendRow}>
+            <input
+              type="checkbox"
+              checked={autoSend}
+              onChange={(e) => { setAutoSend(e.target.checked); setAutoSendState(e.target.checked); }}
+              style={{ margin: 0 }}
+            />
+            Auto-send new swings
+          </label>
         </div>
       </div>
 
@@ -261,6 +281,10 @@ const styles: Record<string, React.CSSProperties> = {
   aggLabel: { fontSize: 10, color: '#445' },
   aggValue: { fontSize: 10, color: '#99aacc', fontVariantNumeric: 'tabular-nums' },
   exportRow: { padding: '8px 10px', borderTop: '1px solid #111', marginTop: 'auto' },
+  autoSendRow: {
+    display: 'flex', alignItems: 'center', gap: 6, marginTop: 6,
+    fontSize: 9, color: '#556', cursor: 'pointer', userSelect: 'none',
+  },
   exportBtn: {
     width: '100%', padding: '5px 0', background: 'transparent',
     border: '1px solid #1a2a1a', borderRadius: 4, color: '#445',

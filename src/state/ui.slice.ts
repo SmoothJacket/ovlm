@@ -9,6 +9,8 @@ export interface OverlayFlags {
   trajectory: boolean;
 }
 
+export type Viewer3DMode = 'ovlm' | 'hittrax';
+
 export interface UISlice {
   activePanel: ActivePanel;
   overlaysEnabled: OverlayFlags;
@@ -16,6 +18,7 @@ export interface UISlice {
   sidebarCollapsed: boolean;
   selectedStadiumId: string | null;
   cameraPreset: 'plate' | 'field';
+  viewer3DMode: Viewer3DMode;
 
   setPanel: (panel: ActivePanel) => void;
   toggleOverlay: (key: keyof OverlayFlags) => void;
@@ -23,7 +26,10 @@ export interface UISlice {
   setSidebarCollapsed: (collapsed: boolean) => void;
   setStadium: (id: string | null) => void;
   setCameraPreset: (preset: 'plate' | 'field') => void;
+  setViewer3DMode: (mode: Viewer3DMode) => void;
 }
+
+const STORAGE_KEY_3D_MODE = 'ovlm_viewer3d_mode';
 
 export const createUISlice: StateCreator<UISlice> = (set) => ({
   activePanel: 'capture',
@@ -37,6 +43,7 @@ export const createUISlice: StateCreator<UISlice> = (set) => ({
   sidebarCollapsed: false,
   selectedStadiumId: null,
   cameraPreset: 'plate',
+  viewer3DMode: (localStorage.getItem(STORAGE_KEY_3D_MODE) === 'hittrax' ? 'hittrax' : 'ovlm') as Viewer3DMode,
 
   setPanel: (panel) => set({ activePanel: panel }),
 
@@ -52,4 +59,9 @@ export const createUISlice: StateCreator<UISlice> = (set) => ({
   setStadium: (id) => set({ selectedStadiumId: id }),
 
   setCameraPreset: (preset) => set({ cameraPreset: preset }),
+
+  setViewer3DMode: (mode) => {
+    localStorage.setItem(STORAGE_KEY_3D_MODE, mode);
+    set({ viewer3DMode: mode });
+  },
 });

@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Dashboard } from './components/layout/Dashboard';
 import { useStore } from './state/store';
 import { piClient } from './ws/client';
+import { initSimulatorBridge } from './integrations/simulator';
 
 export function App(): React.ReactElement {
   const wsHost            = useStore((s) => s.wsHost);
@@ -19,6 +20,10 @@ export function App(): React.ReactElement {
     });
     return () => piClient.disconnect();
   }, [wsHost]);
+
+  useEffect(() => {
+    initSimulatorBridge(); // ready-handshake + auto-forward swings to the sim
+  }, []);
 
   return (
     <>
