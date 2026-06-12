@@ -650,6 +650,7 @@ input[type=number] { width: 70px; padding: 2px 6px; }
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
 import { Line2 }         from 'three/addons/lines/Line2.js';
 import { LineMaterial }  from 'three/addons/lines/LineMaterial.js';
 import { LineGeometry }  from 'three/addons/lines/LineGeometry.js';
@@ -1673,6 +1674,11 @@ const cache = {};
 let activeGroup    = null;
 let activeFilename = null;
 const loader = new GLTFLoader();
+// The vendored stadium GLBs are Draco-compressed (geometry) + WebP (textures).
+// Decoder wasm comes from the same jsdelivr three.js release as the addons.
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/libs/draco/');
+loader.setDRACOLoader(dracoLoader);
 
 function prepAndCache(filename, gltf) {
   const grp = gltf.scene;
