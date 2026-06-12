@@ -69,7 +69,7 @@ class PiClient {
     this.ws.onerror = () => {
       this.store?.updatePipelineStatus({
         wsConnected: false,
-        errorMessage: `Cannot reach Pi at ${this.url}`,
+        errorMessage: `Cannot reach launch monitor at ${this.url}`,
       });
     };
 

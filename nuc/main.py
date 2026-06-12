@@ -11,6 +11,7 @@ import asyncio
 import logging
 import signal
 import sys
+import time
 
 import config
 from audio_trigger import AudioTrigger
@@ -79,12 +80,13 @@ def main() -> None:
     else:
         audio = None
 
-    # Radar trigger: fires the same buffer.trigger() path as audio
+    # Radar trigger: fires the same buffer.trigger() path as audio.
+    # buffer.trigger() expects a monotonic timestamp, not the radar velocity.
     if radar is not None:
         def _radar_trigger(pt) -> None:
             if armed:
                 log.info("Radar trigger at %.1f mph", abs(pt.vel) * 2.23694)
-                buffer.trigger(pt.vel)
+                buffer.trigger(time.monotonic())
         radar.set_trigger_callback(_radar_trigger)
 
     def set_threshold(value: float) -> None:

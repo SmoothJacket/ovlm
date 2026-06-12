@@ -35,7 +35,7 @@ export function StatusBar(): React.ReactElement {
           flexShrink: 0,
         }} />
         <span style={{ ...styles.metricValue, color: status.wsConnected ? '#44ff88' : '#554' }}>
-          {status.wsConnected ? 'PI LIVE' : 'PI OFFLINE'}
+          {status.wsConnected ? 'MONITOR LIVE' : 'MONITOR OFFLINE'}
         </span>
       </div>
 

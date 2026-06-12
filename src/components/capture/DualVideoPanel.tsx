@@ -34,7 +34,7 @@ export function DualVideoPanel(): React.ReactElement {
     <div style={styles.root}>
       {/* ── Connection card ────────────────────────────────────── */}
       <div style={styles.card}>
-        <div style={styles.cardTitle}>PI CONNECTION</div>
+        <div style={styles.cardTitle}>MONITOR CONNECTION</div>
 
         <div style={styles.hostRow}>
           <input
@@ -42,7 +42,7 @@ export function DualVideoPanel(): React.ReactElement {
             value={hostDraft}
             onChange={(e) => setHostDraft(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && applyHost()}
-            placeholder="ws://raspberrypi.local:8765"
+            placeholder="ws://localhost:8765"
             spellCheck={false}
           />
           <button style={styles.btnSecondary} onClick={applyHost}>
@@ -140,8 +140,8 @@ export function DualVideoPanel(): React.ReactElement {
         <div style={styles.guide}>
           <div style={styles.guideTitle}>GETTING STARTED</div>
           <ol style={styles.guideList}>
-            <li>SSH into the Pi and run: <code style={styles.code}>python main.py</code></li>
-            <li>Enter the Pi's WebSocket URL above (default port 8765)</li>
+            <li>In the <code style={styles.code}>nuc\</code> folder run: <code style={styles.code}>python main.py</code></li>
+            <li>Enter the monitor's WebSocket URL above (default ws://localhost:8765)</li>
             <li>Click CONNECT — the status dot will turn green</li>
             <li>Run <code style={styles.code}>python calibrate.py --live</code> if not yet calibrated</li>
             <li>Click ARM, then swing</li>

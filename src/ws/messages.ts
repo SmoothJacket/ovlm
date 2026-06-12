@@ -1,4 +1,4 @@
-/** Messages the Pi sends to the browser */
+/** Messages the launch-monitor backend sends to the browser */
 export type PiMessage =
   | {
       type: 'status';
@@ -13,6 +13,9 @@ export type PiMessage =
       fitResidualMm: number;
       latencyMs: number;
       detectRate: number;
+      /** Inlier / rejected point counts from the trajectory fit (newer backends) */
+      pointsUsed?: number;
+      pointsRejected?: number;
       spin?: {
         rpm: number;
         axis: [number, number, number];
@@ -28,7 +31,7 @@ export type PiMessage =
   | { type: 'health'; cpuTempC: number; memUsedMb: number; memTotalMb: number; loadAvg1m: number }
   | { type: 'error'; message: string };
 
-/** Messages the browser sends to the Pi */
+/** Messages the browser sends to the launch-monitor backend */
 export type BrowserMessage =
   | { type: 'arm' }
   | { type: 'disarm' }

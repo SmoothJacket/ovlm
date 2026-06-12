@@ -35,8 +35,8 @@ export function SettingsPanel(): React.ReactElement {
     <div style={styles.root}>
       <div style={styles.title}>SETTINGS</div>
 
-      {/* ── Pi connection ─────────────────────────────────────────── */}
-      <Section label="PI CONNECTION">
+      {/* ── Monitor connection ────────────────────────────────────── */}
+      <Section label="MONITOR CONNECTION">
         <Row label="WebSocket URL">
           <div style={styles.inputRow}>
             <input
@@ -44,7 +44,7 @@ export function SettingsPanel(): React.ReactElement {
               value={hostDraft}
               onChange={(e) => setHostDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && applyHost()}
-              placeholder="ws://ovlm.local:8765"
+              placeholder="ws://localhost:8765"
               spellCheck={false}
             />
             <button style={styles.btnSmall} onClick={applyHost}>APPLY</button>

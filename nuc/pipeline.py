@@ -1,15 +1,16 @@
 """
-Core tracking pipeline — runs on the Pi.
+Core tracking pipeline — runs on the NUC.
 
 Receives flushed frame windows from FrameBuffer, runs:
   - ROI ball tracking (both cameras)
   - Seam-based spin estimation (camera 0 — closest to ball at contact)
   - Stereo triangulation
-  - Kalman trajectory fitting
+  - Robust ballistic trajectory fitting
   - Launch metric calculation
 and broadcasts results via WebSocket.
 """
 
+import dataclasses
 import logging
 import time
 from typing import List, Optional
@@ -126,7 +127,7 @@ class TrackingPipeline:
                     agree     = abs(radar_mph - cam_mph) / max(cam_mph, 1) <= config.RADAR_AGREE_FRACTION
                     radar_velocity_mps = abs(best.vel)
                     if agree:
-                        metrics = metrics._replace(exit_velocity_mph=round(radar_mph, 1))
+                        metrics = dataclasses.replace(metrics, exit_velocity_mph=round(radar_mph, 1))
                         ev_source = 'radar'
                         log.info("Radar EV %.1f mph (camera=%.1f mph, Δ=%.1f%%)",
                                  radar_mph, cam_mph,
@@ -142,11 +143,12 @@ class TrackingPipeline:
 
         log.info(
             "EV=%.1f mph [%s]  LA=%.1f°  SA=%.1f°  residual=%.2f mm  "
-            "latency=%.0f ms  detection=%.0f%%",
+            "latency=%.0f ms  detection=%.0f%%  fit=%d pts (%d rejected)",
             metrics.exit_velocity_mph, ev_source,
             metrics.launch_angle_deg, metrics.spray_angle_deg,
             metrics.fit_residual_mm, metrics.processing_latency_ms,
             detect_rate * 100,
+            metrics.points_used, metrics.points_rejected,
         )
 
         payload = {
@@ -157,6 +159,8 @@ class TrackingPipeline:
             "fitResidualMm":      metrics.fit_residual_mm,
             "latencyMs":          metrics.processing_latency_ms,
             "detectRate":         round(detect_rate, 3),
+            "pointsUsed":         metrics.points_used,
+            "pointsRejected":     metrics.points_rejected,
             "evSource":           ev_source,
             "radarVelocityMps":   round(radar_velocity_mps, 3) if radar_velocity_mps is not None else None,
             "trajectory":         [

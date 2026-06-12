@@ -49,11 +49,20 @@ const defaultPipelineStatus: PipelineStatus = {
 const STORAGE_KEY_HOST   = 'ovlm_pi_host';
 const STORAGE_KEY_ATR    = 'ovlm_all_time_ev';   // all-time record EV
 
+// Backend runs on this machine since the NUC port — migrate the stale
+// Raspberry Pi default if it's what's saved, but leave custom hosts alone.
+const DEFAULT_WS_HOST = 'ws://localhost:8765';
+function loadWsHost(): string {
+  const saved = localStorage.getItem(STORAGE_KEY_HOST);
+  if (saved == null || saved === 'ws://raspberrypi.local:8765') return DEFAULT_WS_HOST;
+  return saved;
+}
+
 export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
   swings: [],
   activeSwingId: null,
   pipelineStatus: defaultPipelineStatus,
-  wsHost: localStorage.getItem(STORAGE_KEY_HOST) ?? 'ws://raspberrypi.local:8765',
+  wsHost: loadWsHost(),
   audioLevel: null,
   piHealth:   null,
   allTimeBestEv:    parseFloat(localStorage.getItem(STORAGE_KEY_ATR) ?? '0') || 0,
