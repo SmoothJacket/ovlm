@@ -12,7 +12,7 @@ from collections import deque
 from typing import Callable, List, Optional
 
 import config
-from capture import FramePair
+from capture import FramePair, SpinFrame
 
 FlushCallback = Callable[[List[FramePair], float], None]
 
@@ -62,3 +62,31 @@ class FrameBuffer:
         with self._lock:
             self._ring.clear()
             self._trigger_time = None
+
+
+class SpinFrameRing:
+    """
+    Rolling buffer for the optional spin camera. Unlike FrameBuffer it has no
+    trigger logic of its own — the pipeline pulls the ±window around the same
+    trigger timestamp that flushed the stereo buffer, keeping both cameras'
+    windows aligned on the monotonic clock.
+    """
+
+    def __init__(self) -> None:
+        self._ring: deque = deque()
+        self._lock = threading.Lock()
+
+    def push(self, sf: SpinFrame) -> None:
+        with self._lock:
+            self._ring.append(sf)
+            cutoff = sf.timestamp - config.BUFFER_DURATION_S
+            while self._ring and self._ring[0].timestamp < cutoff:
+                self._ring.popleft()
+
+    def window(self, start: float, end: float) -> List[SpinFrame]:
+        with self._lock:
+            return [sf for sf in self._ring if start <= sf.timestamp <= end]
+
+    def clear(self) -> None:
+        with self._lock:
+            self._ring.clear()

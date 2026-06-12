@@ -83,7 +83,8 @@ def list_cameras() -> None:
         print("  Check Device Manager → Imaging Devices / Cameras")
         sys.exit(1)
 
-    print(f"\nFound {len(found)} camera(s). Set CAM0_IDX and CAM1_IDX in config.py.")
+    print(f"\nFound {len(found)} camera(s). Set CAM0_IDX and CAM1_IDX "
+          f"(and SPIN_CAM_IDX if using the spin camera) in config.py.")
     print("Tip: a global-shutter USB camera (e.g. OV9281 module) gives the cleanest ball images.")
 
 

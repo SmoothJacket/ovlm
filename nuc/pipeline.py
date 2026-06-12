@@ -2,8 +2,9 @@
 Core tracking pipeline — runs on the NUC.
 
 Receives flushed frame windows from FrameBuffer, runs:
-  - ROI ball tracking (both cameras)
-  - Seam-based spin estimation (camera 0 — closest to ball at contact)
+  - ROI ball tracking (both stereo cameras)
+  - Seam-based spin estimation (dedicated high-fps spin camera when present,
+    otherwise stereo camera 0)
   - Stereo triangulation
   - Robust ballistic trajectory fitting
   - Launch metric calculation
@@ -28,12 +29,17 @@ MPS_TO_MPH = 2.23694
 
 
 class TrackingPipeline:
-    def __init__(self, server, radar=None) -> None:
+    def __init__(self, server, radar=None, spin_ring=None) -> None:
         self._server       = server
-        self._radar        = radar   # optional IWR6843Reader
+        self._radar        = radar       # optional IWR6843Reader
+        self._spin_ring    = spin_ring   # optional SpinFrameRing (640 fps spin cam)
         self._tracker0     = BallTracker()
-        self._tracker1    = BallTracker()
-        self._seam        = SeamTracker()
+        self._tracker1     = BallTracker()
+        self._tracker_spin = BallTracker(
+            min_radius=config.SPIN_BALL_MIN_RADIUS_PX,
+            max_radius=config.SPIN_BALL_MAX_RADIUS_PX,
+        )
+        self._seam         = SeamTracker()
         self._triangulator = Triangulator()
         self._fitter       = TrajectoryFitter()
 
@@ -52,14 +58,25 @@ class TrackingPipeline:
         self._tracker1.reset()
         self._seam.reset()
 
+        # Spin source: dedicated 640 fps camera when its window has frames,
+        # otherwise fall back to stereo camera 0 inside the loop below.
+        spin_frames = []
+        if self._spin_ring is not None:
+            spin_frames = self._spin_ring.window(
+                trigger_time - config.HALF_WINDOW_S,
+                trigger_time + config.HALF_WINDOW_S,
+            )
+        use_spin_cam = len(spin_frames) > 0
+        spin_source = 'spincam' if use_spin_cam else 'stereo'
+
         points: List[Point3D] = []
 
         for frame_idx, pair in enumerate(frames):
             d0 = self._tracker0.update(pair.left,  frame_idx)
             d1 = self._tracker1.update(pair.right, frame_idx)
 
-            # Feed seam tracker from camera 0 whenever ball is detected
-            if d0 is not None:
+            # Feed seam tracker from camera 0 unless the spin camera covers it
+            if d0 is not None and not use_spin_cam:
                 self._seam.process_frame(pair.left, d0, pair.timestamp, frame_idx)
 
             if d0 is None or d1 is None:
@@ -82,15 +99,26 @@ class TrackingPipeline:
         )
 
         # ── Spin ─────────────────────────────────────────────────────────────
+        if use_spin_cam:
+            self._tracker_spin.reset()
+            for idx, sf in enumerate(spin_frames):
+                det = self._tracker_spin.update(sf.frame, idx)
+                if det is not None:
+                    self._seam.process_frame(sf.frame, det, sf.timestamp, idx)
+            log.info(
+                "Spin cam: %d/%d frames with ball detected",
+                self._tracker_spin.frames_detected, len(spin_frames),
+            )
+
         spin: Optional[SpinMeasurement] = self._seam.compute_spin()
         if spin:
             log.info(
-                "Spin: %.0f rpm  axis=(%.2f, %.2f, %.2f)  eff=%.2f  conf=%.2f  frames=%d",
-                spin.spin_rate_rpm, *spin.spin_axis,
+                "Spin [%s]: %.0f rpm  axis=(%.2f, %.2f, %.2f)  eff=%.2f  conf=%.2f  frames=%d",
+                spin_source, spin.spin_rate_rpm, *spin.spin_axis,
                 spin.spin_efficiency, spin.confidence, spin.frames_analyzed,
             )
         else:
-            log.info("Spin: insufficient seam data")
+            log.info("Spin [%s]: insufficient seam data", spin_source)
 
         # ── Trajectory + metrics ─────────────────────────────────────────────
         latency_ms = (time.monotonic() - t_start) * 1000.0
@@ -176,6 +204,7 @@ class TrackingPipeline:
                 "efficiency":   spin.spin_efficiency,
                 "confidence":   spin.confidence,
                 "framesUsed":   spin.frames_analyzed,
+                "source":       spin_source,
             }
 
         self._server.broadcast(payload)

@@ -15,8 +15,8 @@ import time
 
 import config
 from audio_trigger import AudioTrigger
-from capture import StereoCapturer
-from frame_buffer import FrameBuffer
+from capture import SpinCapturer, StereoCapturer
+from frame_buffer import FrameBuffer, SpinFrameRing
 from pipeline import TrackingPipeline
 from radar import IWR6843Reader
 from server import PipelineServer
@@ -28,6 +28,8 @@ def main() -> None:
                         help="Disable mic trigger (manual arm via browser)")
     parser.add_argument("--radar", action="store_true",
                         help="Enable TI IWR6843ISK radar (also triggers on ball detection)")
+    parser.add_argument("--spin-cam", action="store_true",
+                        help="Enable the optional high-fps spin camera (config.SPIN_CAM_*)")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
@@ -46,7 +48,14 @@ def main() -> None:
         radar.start()
         log.info("IWR6843 radar started")
 
-    pipeline = TrackingPipeline(server, radar=radar)
+    # ── Spin camera (optional) ────────────────────────────────────────────────
+    spin_ring: SpinFrameRing | None = None
+    spin_cap:  SpinCapturer  | None = None
+    if args.spin_cam or config.SPIN_CAM_ENABLED:
+        spin_ring = SpinFrameRing()
+        spin_cap  = SpinCapturer(on_frame=spin_ring.push)
+
+    pipeline = TrackingPipeline(server, radar=radar, spin_ring=spin_ring)
     buffer   = FrameBuffer(on_flush=pipeline.process)
     capturer = StereoCapturer(on_pair=buffer.push)
 
@@ -70,6 +79,8 @@ def main() -> None:
 
     def reset():
         buffer.clear()
+        if spin_ring is not None:
+            spin_ring.clear()
         server.broadcast({"type": "status", "state": "armed"})
         log.info("Reset")
 
@@ -98,6 +109,15 @@ def main() -> None:
 
     log.info("Starting stereo capture …")
     capturer.start()
+
+    if spin_cap is not None:
+        if spin_cap.start():
+            log.info("Spin camera started (index %d @ %d fps)",
+                     config.SPIN_CAM_IDX, config.SPIN_CAM_FPS)
+        else:
+            log.warning("Spin camera not found at index %d — "
+                        "falling back to stereo cam 0 for spin", config.SPIN_CAM_IDX)
+            spin_cap = None
 
     log.info("Ready. Connect browser to ws://localhost:%d", config.WS_PORT)
     server.broadcast({"type": "status", "state": "idle"})
@@ -128,6 +148,8 @@ def main() -> None:
         loop.run_until_complete(_run())
     finally:
         capturer.stop()
+        if spin_cap:
+            spin_cap.stop()
         if audio:
             audio.stop()
         if radar:

@@ -22,6 +22,8 @@ export type PiMessage =
         efficiency: number;
         confidence: number;
         framesUsed: number;
+        /** Which camera measured spin: dedicated high-fps cam or stereo cam 0 */
+        source?: 'spincam' | 'stereo';
       };
       evSource: 'camera' | 'radar';
       radarVelocityMps: number | null;

@@ -79,8 +79,8 @@ class BallTracker:
         tracker.reset()   # before processing the next swing
     """
 
-    def __init__(self) -> None:
-        self._detector  = BallDetector()
+    def __init__(self, min_radius: int = None, max_radius: int = None) -> None:
+        self._detector  = BallDetector(min_radius=min_radius, max_radius=max_radius)
         self._history:  Deque[_Entry] = deque(maxlen=4)
         self._velocity: Tuple[float, float] = (0.0, 0.0)
         self._miss_count  = 0

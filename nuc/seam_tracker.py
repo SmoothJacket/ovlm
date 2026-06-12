@@ -20,7 +20,9 @@ looks roughly perpendicular to the ball flight path (+Z direction).
 Limitation: single-camera seam tracking gives the spin axis component
 perpendicular to the line of sight. True 3D axis needs two cameras or IMU.
 
-Practical ceiling: ~2700 RPM at 120 fps (180° Nyquist limit).
+Practical ceiling scales with fps (180° Nyquist limit, ~75% usable):
+~4 700 RPM at the stereo pair's 210 fps, ~9 400 RPM at the optional
+420 fps spin camera.
 """
 
 import math
