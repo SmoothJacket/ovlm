@@ -1,0 +1,4009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MLB Stadium Ball Flight Simulator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root { --pri: #0ea5e9; --sec: #6366f1; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { overflow: hidden; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 2px; background: #334155; outline: none; width: 100%;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--pri); cursor: pointer; border: 2px solid var(--sec);
+}
+.metric-val { font-size: 1.7rem; font-weight: 700; letter-spacing: 0.05em; }
+.metric-label { font-size: 0.58rem; letter-spacing: 0.15em; text-transform: uppercase; }
+.outcome-hr  { color: #f59e0b; text-shadow: 0 0 12px #f59e0b88; }
+.outcome-2b  { color: #34d399; text-shadow: 0 0 12px #34d39988; }
+.outcome-1b  { color: #60a5fa; text-shadow: 0 0 12px #60a5fa88; }
+.outcome-out { color: #f87171; text-shadow: 0 0 12px #f8717188; }
+.outcome-idle { color: #94a3b8; }
+.outcome-3b { color: #a78bfa; text-shadow: 0 0 12px #a78bfa88; }
+.gs-base-on  { fill: #fbbf24; stroke: #f59e0b; }
+.gs-base-off { fill: #1e293b; stroke: #475569; }
+.gs-out-on   { background: #f87171; }
+.gs-out-off  { background: #1e293b; border: 1px solid #475569; }
+.glow-btn {
+  background: linear-gradient(135deg, var(--pri), var(--sec));
+  box-shadow: 0 0 18px #00000066;
+  border: 1px solid rgba(255,255,255,0.18);
+  text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+  transition: box-shadow 0.2s, transform 0.1s, filter 0.15s;
+}
+.glow-btn:hover { box-shadow: 0 0 28px #000000aa; filter: brightness(1.2); transform: translateY(-1px); }
+.glow-btn:active { transform: translateY(0); }
+#overlay {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(6,16,28,0.96); z-index: 20; gap: 14px;
+}
+.spinner {
+  width: 48px; height: 48px; border: 4px solid #334155;
+  border-top-color: #38bdf8; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.prog-bar-bg { width: 280px; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; }
+.prog-bar    { height: 100%; background: #38bdf8; border-radius: 3px; transition: width 0.2s; }
+.sec { border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 12px; }
+.row { display: flex; justify-content: space-between; align-items: center; }
+select, input[type=number] {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+  border-radius: 4px; padding: 4px 8px; font-size: 12px;
+  font-family: 'Courier New', monospace;
+}
+select { width: 100%; }
+select:focus, input[type=number]:focus { outline: none; border-color: #38bdf8; }
+input[type=number] { width: 70px; padding: 2px 6px; }
+.cal-btn {
+  font-size: 10px; background: #1e293b; border: 1px solid #334155;
+  color: #94a3b8; border-radius: 4px; padding: 3px 8px; cursor: pointer;
+  transition: all 0.15s; font-family: 'Courier New', monospace;
+}
+.cal-btn:hover { background: #334155; color: #e2e8f0; }
+.view-btn {
+  font-size: 10px; background: #0f1f35; border: 1px solid #1e3a5f;
+  color: #7dd3fc; border-radius: 5px; padding: 5px 4px; cursor: pointer;
+  transition: all 0.15s; text-align: center; font-family: 'Courier New', monospace;
+}
+.view-btn:hover { background: #1e3a5f; color: #fff; border-color: var(--sec); }
+.view-btn.active { background: var(--pri); border-color: var(--sec); color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+.mode-btn {
+  flex: 1; padding: 6px 0; border-radius: 5px; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; text-align: center;
+  background: transparent; border: 1px solid transparent; color: #475569;
+  font-family: 'Courier New', monospace; transition: all 0.15s;
+}
+.mode-btn.active { background: var(--pri); border-color: var(--sec); color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+/* Play outcome banner */
+#playBanner {
+  position: absolute; top: 13%; left: 50%;
+  transform: translateX(-50%);
+  display: none; pointer-events: none; z-index: 30;
+  text-align: center; padding: 12px 44px;
+  background: linear-gradient(120deg, var(--pri) 0%, var(--sec) 130%);
+  border: 1px solid rgba(255,255,255,0.45); border-radius: 12px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.55), inset 0 0 18px rgba(255,255,255,0.12);
+}
+#playBanner.show { display: block; animation: bannerPop 2.8s ease forwards; }
+#playBanner .pb-text {
+  font: 900 34px 'Courier New', monospace; letter-spacing: 0.12em;
+  color: #fff; text-shadow: 0 2px 14px rgba(125,211,252,0.85);
+  white-space: nowrap;
+}
+#playBanner .pb-sub {
+  font: 700 13px 'Courier New', monospace; letter-spacing: 0.3em;
+  color: #bfdbfe; margin-top: 3px;
+}
+@keyframes bannerPop {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-28px) scale(0.82); }
+  10%  { opacity: 1; transform: translateX(-50%) translateY(0)     scale(1.05); }
+  15%  { transform: translateX(-50%) scale(1); }
+  78%  { opacity: 1; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-14px) scale(0.95); }
+}
+/* HitTrax-style session panel */
+.htx-lab  { font-size: 9px; color: #7c8694; letter-spacing: 0.08em; font-weight: 600; }
+.htx-big  { font-size: 16px; font-weight: 800; color: #fff; font-family: 'Courier New', monospace; line-height: 1.15; }
+.htx-sm   { font-size: 11px; font-weight: 700; color: #e8edf3; font-family: 'Courier New', monospace; }
+.htx-thead span { font-size: 9px; color: #ff4d5e; font-weight: 800; letter-spacing: 0.05em; }
+.htx-row  { line-height: 1.6; }
+.htx-row span { font-size: 10px; color: #cfd6de; font-family: 'Courier New', monospace; }
+.htx-row:nth-child(even) { background: rgba(255,255,255,0.035); }
+/* Session / player / contact-point additions */
+.chip { font-size: 9px; font-weight: 800; letter-spacing: 0.1em; padding: 2px 8px; border-radius: 9999px; }
+#zoneCv { background: #0b1220; border: 1px solid #1e293b; border-radius: 6px; cursor: crosshair; touch-action: none; }
+.pl-input {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+  border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 100%;
+  font-family: 'Courier New', monospace;
+}
+.pl-input:focus { outline: none; border-color: #fb923c; }
+.htx-strip { font-size: 9px; letter-spacing: 0.08em; font-weight: 700; font-family: 'Courier New', monospace; }
+</style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen flex">
+
+<!-- LEFT PANEL -->
+<div class="flex flex-col w-[330px] min-w-[310px] h-screen overflow-y-auto bg-slate-900 border-r border-slate-800 p-4">
+
+  <div class="sec">
+    <div id="appHeader" class="rounded-lg px-3 py-2.5 relative overflow-hidden"
+         style="background:linear-gradient(120deg,var(--pri) 0%,var(--sec) 145%);box-shadow:0 4px 18px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15)">
+      <div style="position:absolute;inset:0;background:linear-gradient(115deg,transparent 55%,rgba(255,255,255,0.09) 55.5%,rgba(255,255,255,0.09) 70%,transparent 70.5%)"></div>
+      <div class="text-xs tracking-widest mb-0.5" style="color:rgba(255,255,255,0.7)">MLB STADIUM SIMULATOR</div>
+      <div class="text-base font-black tracking-wide text-white" style="text-shadow:0 1px 6px rgba(0,0,0,0.55)" id="hdrTeam">Ball Flight Simulator</div>
+      <div class="text-xs" style="color:rgba(255,255,255,0.65)" id="hdrSub">Imperial physics · Home plate = origin</div>
+    </div>
+  </div>
+
+  <!-- Stadium selector -->
+  <div class="sec flex flex-col gap-2">
+    <div class="row">
+      <div class="text-xs text-slate-400 tracking-widest">STADIUM</div>
+      <span id="loadBadge" class="text-xs text-slate-600">Loading…</span>
+    </div>
+    <select id="stadiumSelect">
+      <optgroup label="-- AL East --">
+        <option value="Stadium_NYY.glb">Yankee Stadium (NYY Yankees)</option>
+        <option value="Stadium_BOS.glb">Fenway Park (BOS Red Sox)</option>
+        <option value="Stadium_BAL.glb">Oriole Park (BAL Orioles)</option>
+        <option value="Stadium_TB.glb">Tropicana Field (TB Rays)</option>
+        <option value="Stadium_TOR.glb">Rogers Centre (TOR Blue Jays)</option>
+      </optgroup>
+      <optgroup label="-- AL Central --">
+        <option value="Stadium_CWS.glb">Guaranteed Rate Field (CWS White Sox)</option>
+        <option value="Stadium_CLE.glb">Progressive Field (CLE Guardians)</option>
+        <option value="Stadium_DET.glb">Comerica Park (DET Tigers)</option>
+        <option value="Stadium_KC.glb">Kauffman Stadium (KC Royals)</option>
+        <option value="Stadium_MIN.glb">Target Field (MIN Twins)</option>
+        <option value="Stadium_MIL.glb">American Family Field (MIL Brewers)</option>
+      </optgroup>
+      <optgroup label="-- AL West --">
+        <option value="Stadium_HOU.glb">Minute Maid Park (HOU Astros)</option>
+        <option value="Stadium_LAA.glb">Angel Stadium (LAA Angels)</option>
+        <option value="Stadium_OAK.glb">Oakland Coliseum (OAK Athletics)</option>
+        <option value="Stadium_SEA.glb">T-Mobile Park (SEA Mariners)</option>
+        <option value="Stadium_TEX.glb">Globe Life Field (TEX Rangers)</option>
+      </optgroup>
+      <optgroup label="-- NL East --">
+        <option value="Stadium_ATL.glb">Truist Park (ATL Braves)</option>
+        <option value="Stadium_MIA.glb">LoanDepot Park (MIA Marlins)</option>
+        <option value="Stadium_NYM.glb">Citi Field (NYM Mets)</option>
+        <option value="Stadium_PHI.glb">Citizens Bank Park (PHI Phillies)</option>
+        <option value="Stadium_WSH.glb">Nationals Park (WSH Nationals)</option>
+      </optgroup>
+      <optgroup label="-- NL Central --">
+        <option value="Stadium_CHC.glb">Wrigley Field (CHC Cubs)</option>
+        <option value="Stadium_CIN.glb">Great American Ball Park (CIN Reds)</option>
+        <option value="Stadium_MIL.glb">American Family Field (MIL Brewers)</option>
+        <option value="Stadium_PIT.glb">PNC Park (PIT Pirates)</option>
+        <option value="Stadium_STL.glb">Busch Stadium (STL Cardinals)</option>
+      </optgroup>
+      <optgroup label="-- NL West --">
+        <option value="Stadium_ARI.glb">Chase Field (ARI D-backs)</option>
+        <option value="Stadium_COL.glb">Coors Field (COL Rockies)</option>
+        <option value="Stadium_LAD.glb">Dodger Stadium (LAD Dodgers)</option>
+        <option value="Stadium_SD.glb">Petco Park (SD Padres)</option>
+        <option value="Stadium_SF.glb">Oracle Park (SF Giants)</option>
+      </optgroup>
+    </select>
+    <div class="row mt-1">
+      <div class="text-xs text-slate-400 tracking-widest">FIELD SCALE / AGE</div>
+      <span id="fsChip" class="chip" style="background:#1e3a5f;color:#7dd3fc">PRO</span>
+    </div>
+    <select id="fieldScaleSel">
+      <option value="pro">Pro / MLB — full size</option>
+      <option value="hs">High School / College — 95% field</option>
+      <option value="u14">13–14u — 70% field</option>
+      <option value="u12">11–12u Little League — 50% field</option>
+      <option value="u10">9–10u — 45% field</option>
+      <option value="u8">7–8u Coach Pitch — 38% field</option>
+    </select>
+    <div class="text-slate-600 text-xs" id="fsInfo"></div>
+  </div>
+
+  <!-- Mode Toggle -->
+  <div class="sec">
+    <div class="flex gap-1 bg-slate-800 rounded-lg p-1">
+      <button id="modHit"   class="mode-btn active">HIT</button>
+      <button id="modPitch" class="mode-btn">PITCH</button>
+    </div>
+  </div>
+
+  <!-- Session Setup -->
+  <div class="sec flex flex-col gap-2">
+    <div class="row">
+      <div class="text-xs text-slate-400 tracking-widest">SESSION</div>
+      <span id="sessChip" class="chip" style="background:#7c2d12;color:#fdba74">GAME · TEE</span>
+    </div>
+    <div class="flex gap-1 bg-slate-800 rounded-lg p-1">
+      <button id="sessGame" class="mode-btn active">Game</button>
+      <button id="sessPractice" class="mode-btn">Practice</button>
+    </div>
+    <select id="sessType">
+      <option value="Tee">Tee</option>
+      <option value="Front Toss">Front Toss</option>
+      <option value="Machine">Machine</option>
+      <option value="Live">Live</option>
+    </select>
+    <div class="text-slate-600 text-xs" id="sessHint">Game tracks score, innings &amp; bases.</div>
+  </div>
+
+  <!-- Player Profile -->
+  <div class="sec flex flex-col gap-2">
+    <div class="row">
+      <div class="text-xs text-slate-400 tracking-widest">PLAYER</div>
+      <span class="flex gap-1.5">
+        <button id="plAddBtn" class="cal-btn">+ new</button>
+        <button id="plEditBtn" class="cal-btn">edit</button>
+      </span>
+    </div>
+    <select id="playerSelect"></select>
+    <div class="row">
+      <div id="plInfo" class="text-xs text-slate-500"></div>
+      <div id="plSideRow" class="flex gap-1 bg-slate-800 rounded p-0.5" style="display:none">
+        <button id="plSideL" class="mode-btn" style="padding:2px 8px;font-size:10px">L</button>
+        <button id="plSideR" class="mode-btn" style="padding:2px 8px;font-size:10px">R</button>
+      </div>
+    </div>
+    <div id="plForm" class="flex-col gap-2 bg-slate-800 rounded-lg p-2.5 border border-slate-700" style="display:none">
+      <input id="plName" type="text" class="pl-input" placeholder="Player name" maxlength="18"/>
+      <div class="grid grid-cols-3 gap-2">
+        <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Ht (in)</div><input id="plHt" type="number" min="48" max="84" value="72" style="width:100%"/></div>
+        <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Wt (lb)</div><input id="plWt" type="number" min="60" max="320" value="180" style="width:100%"/></div>
+        <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Bats</div>
+          <select id="plBats"><option value="R">R</option><option value="L">L</option><option value="S">S</option></select>
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-1.5">
+        <button id="plSaveBtn" class="cal-btn py-1.5 text-emerald-400 border-emerald-900">Save</button>
+        <button id="plCancelBtn" class="cal-btn py-1.5">Cancel</button>
+        <button id="plDeleteBtn" class="cal-btn py-1.5 text-red-400 border-red-900">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hit section -->
+  <div id="hitSection">
+  <div class="sec flex flex-col gap-3">
+    <div class="text-xs text-slate-400 tracking-widest">HIT PARAMETERS</div>
+    <div class="flex flex-col gap-1">
+      <div class="row">
+        <span class="text-sm text-slate-300">Exit Velocity</span>
+        <span class="text-sky-400 font-bold text-sm"><span id="evVal">98</span> mph</span>
+      </div>
+      <input type="range" id="exitVelocity" min="40" max="120" value="98" step="1"/>
+      <div class="row text-slate-600 text-xs"><span>40</span><span>120 mph</span></div>
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="row">
+        <span class="text-sm text-slate-300">Launch Angle</span>
+        <span class="text-sky-400 font-bold text-sm"><span id="laVal">28</span>&deg;</span>
+      </div>
+      <input type="range" id="launchAngle" min="-20" max="60" value="28" step="1"/>
+      <div class="row text-slate-600 text-xs"><span>-20 (GB)</span><span>60 (Pop)</span></div>
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="row">
+        <span class="text-sm text-slate-300">Spray Angle</span>
+        <span class="text-sky-400 font-bold text-sm"><span id="saVal">0</span>&deg;</span>
+      </div>
+      <input type="range" id="sprayAngle" min="-45" max="45" value="0" step="1"/>
+      <div class="row text-slate-600 text-xs"><span>-45 LF</span><span>+45 RF</span></div>
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="row">
+        <span class="text-sm text-slate-300">Backspin</span>
+        <span class="text-sky-400 font-bold text-sm"><span id="bsVal">1800</span> rpm</span>
+      </div>
+      <input type="range" id="backspin" min="-1000" max="4000" value="1800" step="50"/>
+      <div class="row text-slate-600 text-xs"><span>-1000 (topspin)</span><span>4000</span></div>
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="row">
+        <span class="text-sm text-slate-300">Sidespin</span>
+        <span class="text-sky-400 font-bold text-sm"><span id="ssVal">0</span> rpm</span>
+      </div>
+      <input type="range" id="sidespin" min="-2500" max="2500" value="0" step="50"/>
+      <div class="row text-slate-600 text-xs"><span>-2500 hook LF</span><span>+2500 slice RF</span></div>
+    </div>
+  </div>
+
+  <!-- Contact point in the strike zone + contact depth -->
+  <div class="sec flex flex-col gap-2">
+    <div class="row">
+      <div class="text-xs tracking-widest" style="color:#fb923c">CONTACT POINT</div>
+      <span class="text-xs font-bold" style="color:#2dd4bf" id="ctZoneLbl">ZONE 5</span>
+    </div>
+    <div class="flex gap-3">
+      <canvas id="zoneCv" width="224" height="296" style="width:112px;height:148px;flex-shrink:0"></canvas>
+      <div class="flex flex-col gap-2 flex-1 justify-center">
+        <div class="flex flex-col gap-1">
+          <div class="row"><span class="text-xs text-slate-400">Height</span><span class="text-xs font-bold" style="color:#fb923c"><span id="ctHtVal">2.50</span> ft</span></div>
+          <input type="range" id="ctHt" min="0.8" max="4.6" value="2.5" step="0.05"/>
+        </div>
+        <div class="flex flex-col gap-1">
+          <div class="row"><span class="text-xs text-slate-400">Side</span><span class="text-xs font-bold" style="color:#fb923c"><span id="ctSideVal">0.0</span> in</span></div>
+          <input type="range" id="ctSide" min="-14" max="14" value="0" step="0.5"/>
+        </div>
+        <div class="flex flex-col gap-1">
+          <div class="row"><span class="text-xs text-slate-400">Depth</span><span class="text-xs font-bold" style="color:#fb923c"><span id="ctDepthVal">+4.0</span> in</span></div>
+          <input type="range" id="ctDepth" min="-12" max="18" value="4" step="0.5"/>
+        </div>
+        <div class="text-slate-600 text-xs leading-tight">Click the zone to aim. Depth + = out front of the plate.</div>
+      </div>
+    </div>
+  </div>
+  </div><!-- /hitSection -->
+
+  <!-- Pitch section -->
+  <div id="pitchSection" style="display:none">
+  <div class="sec flex flex-col gap-3">
+    <div class="text-xs text-slate-400 tracking-widest">PITCH TYPE</div>
+    <select id="pitchType">
+      <option value="4-Seam FB">4-Seam Fastball</option>
+      <option value="2-Seam FB">2-Seam Fastball</option>
+      <option value="Sinker">Sinker</option>
+      <option value="Cutter">Cutter</option>
+      <option value="Slider">Slider</option>
+      <option value="Curveball">Curveball</option>
+      <option value="Changeup">Changeup</option>
+      <option value="Splitter">Splitter</option>
+    </select>
+  </div>
+  <div class="sec flex flex-col gap-3">
+    <div class="text-xs text-slate-400 tracking-widest">PITCH PARAMETERS</div>
+    <div class="flex flex-col gap-1">
+      <div class="row"><span class="text-sm text-slate-300">Velocity</span><span class="text-sky-400 font-bold text-sm"><span id="pitchVeloVal">94</span> mph</span></div>
+      <input type="range" id="pitchVelo" min="60" max="102" value="94" step="1"/>
+      <div class="row text-slate-600 text-xs"><span>60</span><span>102 mph</span></div>
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="row"><span class="text-sm text-slate-300">Spin Rate</span><span class="text-sky-400 font-bold text-sm"><span id="pitchSpinVal">2300</span> rpm</span></div>
+      <input type="range" id="pitchSpin" min="800" max="3600" value="2300" step="50"/>
+      <div class="row text-slate-600 text-xs"><span>800</span><span>3600 rpm</span></div>
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="row"><span class="text-sm text-slate-300">Spin Axis (Tilt)</span><span class="text-sky-400 font-bold text-sm" id="pitchTiltDisp">12:00</span></div>
+      <input type="range" id="pitchTilt" min="0" max="359" value="0" step="1"/>
+      <div class="row text-slate-600 text-xs"><span>12:00 (top)</span><span>6:00 (bot)</span></div>
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="row"><span class="text-sm text-slate-300">Gyro %</span><span class="text-sky-400 font-bold text-sm"><span id="pitchGyroVal">0</span>%</span></div>
+      <input type="range" id="pitchGyro" min="0" max="80" value="0" step="1"/>
+      <div class="row text-slate-600 text-xs"><span>0% pure Magnus</span><span>80% gyro</span></div>
+    </div>
+  </div>
+  <div class="sec flex flex-col gap-2">
+    <div class="text-xs text-slate-400 tracking-widest">RELEASE POINT</div>
+    <div class="grid grid-cols-3 gap-2">
+      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Ht (ft)</div><input type="number" id="relHeight" value="5.8" step="0.1" style="width:100%"/></div>
+      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Side (ft)</div><input type="number" id="relSide" value="2.5" step="0.1" style="width:100%"/></div>
+      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Ext (ft)</div><input type="number" id="relExt" value="6.0" step="0.1" style="width:100%"/></div>
+    </div>
+    <div class="grid grid-cols-2 gap-2 mt-1">
+      <div class="flex flex-col gap-1">
+        <div class="row"><span class="text-xs text-slate-400">V.Angle</span><span class="text-sky-400 text-xs"><span id="pitchVAngleVal">-2.0</span>°</span></div>
+        <input type="range" id="pitchVAngle" min="-8" max="0" value="-2" step="0.1"/>
+      </div>
+      <div class="flex flex-col gap-1">
+        <div class="row"><span class="text-xs text-slate-400">H.Angle</span><span class="text-sky-400 text-xs"><span id="pitchHAngleVal">-1.0</span>°</span></div>
+        <input type="range" id="pitchHAngle" min="-5" max="5" value="-1" step="0.1"/>
+      </div>
+    </div>
+  </div>
+  </div><!-- /pitchSection -->
+
+  <button id="launchBtn" class="glow-btn text-white font-bold py-2.5 rounded-lg text-sm tracking-widest uppercase w-full mb-3">
+    Launch Ball
+  </button>
+
+  <!-- Camera views -->
+  <div class="sec flex flex-col gap-2">
+    <div class="text-xs text-slate-400 tracking-widest">CAMERA VIEWS</div>
+    <div class="grid grid-cols-2 gap-1.5">
+      <button class="view-btn" data-view="batter">Batter POV</button>
+      <button class="view-btn" data-view="press">Press Box</button>
+      <button class="view-btn" data-view="cf">Center Field</button>
+      <button class="view-btn" data-view="overhead">Overhead</button>
+      <button class="view-btn" data-view="firstbase">1B Line</button>
+      <button class="view-btn" data-view="thirdbase">3B Line</button>
+      <button class="view-btn" data-view="lf">LF Corner</button>
+      <button class="view-btn" data-view="rf">RF Corner</button>
+    </div>
+  </div>
+
+  <!-- Hit Metrics -->
+  <div id="hitMetrics" class="sec flex flex-col gap-2">
+    <div class="text-xs text-slate-400 tracking-widest">FLIGHT METRICS</div>
+    <div class="grid grid-cols-2 gap-2">
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Distance</div>
+        <div class="metric-val text-white" id="mDist">--</div>
+        <div class="text-slate-500 text-xs">feet</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Max Height</div>
+        <div class="metric-val text-white" id="mHeight">--</div>
+        <div class="text-slate-500 text-xs">feet</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Hang Time</div>
+        <div class="metric-val text-white" id="mHang">--</div>
+        <div class="text-slate-500 text-xs">seconds</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Exit Velo</div>
+        <div class="metric-val text-sky-400" id="mEV">98</div>
+        <div class="text-slate-500 text-xs">mph</div>
+      </div>
+    </div>
+    <div class="bg-slate-800 rounded-lg p-3 border border-slate-700 text-center">
+      <div class="metric-label text-slate-400 mb-1">PLAY OUTCOME</div>
+      <div class="text-2xl font-black tracking-wider outcome-idle" id="mOutcome">READY</div>
+      <div class="text-xs text-slate-500 mt-0.5" id="mEventCode">—</div>
+    </div>
+    <!-- Contact readout -->
+    <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700 flex items-center justify-between">
+      <div>
+        <div class="metric-label text-slate-400">Contact</div>
+        <div class="text-sm font-bold text-white" id="mContact">--</div>
+      </div>
+      <div class="text-right">
+        <div class="metric-label text-slate-400">Depth</div>
+        <div class="text-sm font-bold" style="color:#fb923c" id="mDepth">--</div>
+      </div>
+    </div>
+    <!-- Game State -->
+    <div id="gameStatePanel" class="bg-slate-800 rounded-lg p-3 border border-slate-700">
+      <div class="flex items-center justify-between mb-1.5">
+        <div class="metric-label text-slate-400">GAME STATE</div>
+        <button onclick="resetGameState()" class="text-xs text-slate-600 hover:text-slate-400 px-1">reset</button>
+      </div>
+      <div class="flex items-center justify-between">
+        <!-- Inning + outs -->
+        <div class="flex flex-col gap-1">
+          <div class="text-white text-xs font-mono" id="gsInning">TOP 1</div>
+          <div class="flex gap-1 mt-0.5">
+            <div class="w-2.5 h-2.5 rounded-full gs-out-off" id="gsOut0"></div>
+            <div class="w-2.5 h-2.5 rounded-full gs-out-off" id="gsOut1"></div>
+            <div class="w-2.5 h-2.5 rounded-full gs-out-off" id="gsOut2"></div>
+          </div>
+        </div>
+        <!-- Base diamond SVG -->
+        <svg viewBox="0 0 44 44" width="46" height="46" style="flex-shrink:0">
+          <polyline points="22,6 38,22 22,38 6,22 22,6" fill="none" stroke="#334155" stroke-width="1"/>
+          <polygon id="gs2B" class="gs-base-off" points="22,2 26,6 22,10 18,6" stroke-width="1.5"/>
+          <polygon id="gs1B" class="gs-base-off" points="34,18 38,22 34,26 30,22" stroke-width="1.5"/>
+          <polygon id="gs3B" class="gs-base-off" points="10,18 14,22 10,26 6,22" stroke-width="1.5"/>
+          <polygon points="22,34 26,38 22,42 18,38" fill="none" stroke="#475569" stroke-width="1.5"/>
+        </svg>
+        <!-- Score -->
+        <div class="flex flex-col items-end gap-0.5">
+          <div class="text-xs text-slate-500">SCORE</div>
+          <div class="font-mono text-sm text-white"><span id="gsAway">0</span>–<span id="gsHome">0</span></div>
+          <div class="text-xs text-slate-600 mt-0.5" id="gsRuns"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pitch Metrics -->
+  <div id="pitchMetrics" class="sec flex flex-col gap-2" style="display:none">
+    <div class="text-xs text-slate-400 tracking-widest">PITCH METRICS</div>
+    <div class="grid grid-cols-2 gap-2">
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Plate Ht</div>
+        <div class="metric-val text-white" id="pm_height">--</div>
+        <div class="text-slate-500 text-xs">feet AGL</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Plate Side</div>
+        <div class="metric-val text-white" id="pm_side">--</div>
+        <div class="text-slate-500 text-xs">inches</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Horiz Brk</div>
+        <div class="metric-val text-white" id="pm_hbreak">--</div>
+        <div class="text-slate-500 text-xs">inches</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">iVB</div>
+        <div class="metric-val text-white" id="pm_ivb">--</div>
+        <div class="text-slate-500 text-xs">inches</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">VAA</div>
+        <div class="metric-val text-white" id="pm_vaa">--</div>
+        <div class="text-slate-500 text-xs">degrees</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Plate Velo</div>
+        <div class="metric-val text-sky-400" id="pm_velo">--</div>
+        <div class="text-slate-500 text-xs">mph</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Time/Plate</div>
+        <div class="metric-val text-white" id="pm_time">--</div>
+        <div class="text-slate-500 text-xs">seconds</div>
+      </div>
+      <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+        <div class="metric-label text-slate-400">Result</div>
+        <div class="metric-val outcome-idle" id="pm_zone">--</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calibration -->
+  <div class="sec flex flex-col gap-2">
+    <div class="row">
+      <div class="text-xs text-slate-400 tracking-widest">HOME PLATE CALIBRATION</div>
+    </div>
+    <div class="text-slate-600 text-xs">Move model until the pentagon sits at the blue ring, then save.</div>
+    <div class="grid grid-cols-3 gap-2 mt-1">
+      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">X (L/R)</div><input type="number" id="offX" value="0" step="0.5"/></div>
+      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Y (Up)</div><input type="number" id="offY" value="0" step="0.5"/></div>
+      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Z (Fwd)</div><input type="number" id="offZ" value="0" step="0.5"/></div>
+    </div>
+    <div class="flex flex-col gap-1">
+      <div class="text-xs text-slate-500">Scale</div>
+      <input type="number" id="modelScale" value="3.28" step="0.01" style="width:100%"/>
+    </div>
+    <div class="grid grid-cols-2 gap-1.5">
+      <button id="applyCalBtn" class="cal-btn py-1.5 text-sky-400 border-sky-900">Apply</button>
+      <button id="saveHomePlateBtn" class="cal-btn py-1.5 text-emerald-400 border-emerald-900">Save as 0,0,0</button>
+    </div>
+    <button id="resetCalBtn" class="cal-btn w-full py-1 text-red-400 border-red-900">Reset to Default</button>
+    <div id="calInfo" class="text-slate-600 text-xs leading-relaxed"></div>
+  </div>
+
+  <!-- Wall dimensions (updated per stadium) -->
+  <div id="wallDimsPanel" class="bg-slate-800 rounded-lg p-3 border border-slate-700 text-xs text-slate-500 mt-auto">
+    <div class="text-slate-600 italic">Select a stadium to see dimensions.</div>
+  </div>
+</div>
+
+<!-- RIGHT CANVAS -->
+<div id="canvasWrap" class="flex-1 h-screen relative">
+  <div id="overlay">
+    <div class="spinner"></div>
+    <div class="text-sky-400 text-sm tracking-widest">MLB STADIUM SIMULATOR</div>
+    <div class="prog-bar-bg"><div class="prog-bar" id="progBar" style="width:0%"></div></div>
+    <div class="text-slate-400 text-xs" id="loadStatus">Starting up...</div>
+  </div>
+  <div class="absolute bottom-3 right-4 text-slate-700 text-xs pointer-events-none">
+    Orbit: drag &nbsp; Zoom: scroll &nbsp; Pan: right-drag
+  </div>
+  <div class="absolute top-3 left-3 bg-slate-900 bg-opacity-80 rounded px-3 py-2 text-xs text-slate-400 font-mono pointer-events-none leading-relaxed" id="hud">
+    Ready
+  </div>
+  <!-- Play outcome banner -->
+  <div id="playBanner">
+    <div class="pb-text" id="pbText"></div>
+    <div class="pb-sub" id="pbSub"></div>
+  </div>
+  <!-- HitTrax-style session panel (drag title bar to move, buttons to scale/collapse) -->
+  <div id="gameLogPanel" class="absolute top-3 right-4 rounded overflow-hidden select-none" style="width:306px;background:rgba(8,10,14,0.93);border:1px solid #2a2f3a">
+    <div id="glTitleBar" class="flex justify-between items-center px-2.5 py-1" style="background:#c8102e;cursor:move;touch-action:none">
+      <span class="text-white text-xs font-black italic tracking-wide">HIT<span style="color:#ffd0d6">TRAX</span>&nbsp;<span class="not-italic font-semibold" style="font-size:9px;opacity:.9">SESSION</span></span>
+      <span class="flex items-center gap-1.5">
+        <span class="text-white font-mono" style="font-size:10px" id="glGame">&#9650;1 &middot; 0&ndash;0 &middot; 0 OUT</span>
+        <button id="glScale" title="Resize" class="text-white font-bold leading-none px-1 rounded hover:bg-black/20" style="font-size:10px;background:rgba(0,0,0,0.18)">A</button>
+        <button id="glCollapse" title="Collapse" class="text-white font-bold leading-none px-1 rounded hover:bg-black/20" style="font-size:12px;background:rgba(0,0,0,0.18)">&ndash;</button>
+      </span>
+    </div>
+    <div id="glBody">
+    <div class="flex justify-between items-center px-2.5 py-1" style="border-bottom:1px solid #232833;background:#10141c">
+      <span class="htx-strip text-white" id="glPlName">PLAYER 1</span>
+      <span class="htx-strip" style="color:#7c8694" id="glPlMeta">6'0" · 180 · R</span>
+      <span class="htx-strip" style="color:#2dd4bf" id="glSessType">TEE</span>
+    </div>
+    <div class="grid grid-cols-4 text-center pt-1.5 pb-1" style="border-bottom:1px solid #232833">
+      <div><div class="htx-lab">AVG</div><div class="htx-big" id="glBA">.000</div></div>
+      <div><div class="htx-lab">SLG</div><div class="htx-big" id="glSLG">.000</div></div>
+      <div><div class="htx-lab">xBA</div><div class="htx-big" style="color:#7dd3fc" id="glXBA">.000</div></div>
+      <div><div class="htx-lab">HR</div><div class="htx-big" id="glHR">0</div></div>
+    </div>
+    <div class="grid grid-cols-5 text-center py-1" style="border-bottom:1px solid #232833">
+      <div><div class="htx-lab">MAX VEL</div><div class="htx-sm" id="glMaxV">--</div></div>
+      <div><div class="htx-lab">AVG VEL</div><div class="htx-sm" id="glAvgV">--</div></div>
+      <div><div class="htx-lab">MAX DST</div><div class="htx-sm" id="glMaxD">--</div></div>
+      <div><div class="htx-lab">AVG DST</div><div class="htx-sm" id="glAvgD">--</div></div>
+      <div><div class="htx-lab">HH%</div><div class="htx-sm" id="glHH">--</div></div>
+    </div>
+    <div class="grid px-2 py-0.5 htx-thead" style="grid-template-columns:22px 36px 38px 32px 42px 34px 38px;background:#171b24">
+      <span>#</span><span>RES</span><span>VEL</span><span>LA</span><span>DIST</span><span>TYP</span><span>xBA</span>
+    </div>
+    <div id="glRows"></div>
+    <div class="px-2.5 py-1 font-mono text-right" style="font-size:10px;color:#7c8694;border-top:1px solid #232833">H-AB <span class="text-white" id="glABH">0-0</span></div>
+    <!-- Charts -->
+    <div style="border-top:1px solid #232833">
+      <div class="flex justify-between items-center px-2 py-1" style="background:#171b24">
+        <span style="font-size:9px;color:#ff4d5e;font-weight:800;letter-spacing:.05em">CHARTS</span>
+        <select id="glChartSel" style="background:#0d1117;color:#cfd6de;border:1px solid #2a2f3a;font-size:10px;border-radius:3px;padding:1px 4px;outline:none">
+          <option value="spray">Spray Chart</option>
+          <option value="zone">Zone Contact</option>
+          <option value="evla">EV / LA Profile</option>
+          <option value="dist">Distance Histogram</option>
+          <option value="trend">EV Trend</option>
+          <option value="mix">Outcome Mix</option>
+        </select>
+      </div>
+      <canvas id="glChart" style="width:100%;display:block"></canvas>
+    </div>
+    </div><!-- /glBody -->
+  </div>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { Line2 }         from 'three/addons/lines/Line2.js';
+import { LineMaterial }  from 'three/addons/lines/LineMaterial.js';
+import { LineGeometry }  from 'three/addons/lines/LineGeometry.js';
+
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────
+const MODEL_SCALE = 3.28;   // meters -> feet for all GLB models
+const GRAVITY     = 32.2;   // ft/s^2
+const MASS        = 0.3125; // lbs
+const RHO         = 0.075;  // lbs/ft^3
+const A_CROSS     = 0.045;  // ft^2
+const CD          = 0.3;
+const FPS_SIM     = 120;
+const TRAIL_MAX   = 1200;
+const LAUNCH_YAW  = -Math.PI / 2; // CF along -Z axis
+
+const BALL_RADIUS = 0.121; // ft (1.45 in)
+
+// ── FIELD SCALE / AGE LEVELS ─────────────────────────────────────────────────
+// k shrinks the stadium model (fences, stands, painted infield) around home
+// plate. The drawn diamond overlay, mound and pitch release all use the SAME k
+// so every marking registers with the scaled model. Ball physics stay real.
+// k is picked so the fences land at typical fence distances for the age group.
+const FIELD_SCALES = {
+  pro: { label:'PRO',    k:1.00, name:'Pro / MLB' },
+  hs:  { label:'HS',     k:0.95, name:'High School / College' },
+  u14: { label:'13-14U', k:0.70, name:'13–14u' },
+  u12: { label:'11-12U', k:0.50, name:'11–12u Little League' },
+  u10: { label:'9-10U',  k:0.45, name:'9–10u' },
+  u8:  { label:'7-8U',   k:0.38, name:'7–8u Coach Pitch' },
+};
+const FIELD_SCALE_KEY = 'mlbSim_fieldScale_v1';
+let fieldScaleKey = (() => {
+  try { const k = localStorage.getItem(FIELD_SCALE_KEY); return FIELD_SCALES[k] ? k : 'pro'; }
+  catch(e) { return 'pro'; }
+})();
+let fieldScale = FIELD_SCALES[fieldScaleKey].k;
+
+// Pitch presets: velo=mph, spin=rpm, tilt=deg(0=12:00 CW from catcher view),
+// gyro=% gyro spin, relH/relS/ext=ft, vAng/hAng=deg
+const PITCH_PRESETS = {
+  '4-Seam FB': { velo:94, spin:2300, tilt:0,   gyro:0,  relH:5.8, relS:2.5, ext:6.0, vAng:-1.8, hAng:-1.0 },
+  '2-Seam FB': { velo:92, spin:2100, tilt:330,  gyro:10, relH:5.8, relS:2.5, ext:6.0, vAng:-2.0, hAng:-1.2 },
+  'Sinker':    { velo:92, spin:2000, tilt:300,  gyro:5,  relH:5.8, relS:2.5, ext:6.0, vAng:-2.2, hAng:-1.2 },
+  'Cutter':    { velo:89, spin:2400, tilt:60,   gyro:20, relH:5.8, relS:2.5, ext:6.0, vAng:-2.0, hAng:-1.0 },
+  'Slider':    { velo:85, spin:2500, tilt:45,   gyro:25, relH:5.8, relS:2.5, ext:6.0, vAng:-2.5, hAng:-1.0 },
+  'Curveball': { velo:78, spin:2600, tilt:180,  gyro:5,  relH:5.8, relS:2.5, ext:6.0, vAng:-4.0, hAng:-1.0 },
+  'Changeup':  { velo:85, spin:1800, tilt:315,  gyro:15, relH:5.8, relS:2.5, ext:6.0, vAng:-2.0, hAng:-1.0 },
+  'Splitter':  { velo:86, spin:1200, tilt:250,  gyro:30, relH:5.8, relS:2.5, ext:6.0, vAng:-3.0, hAng:-1.0 },
+};
+
+const ALL_STADIUMS = [
+  'Stadium_SF.glb','Stadium_LAA.glb','Stadium_NYM.glb','Stadium_LAD.glb',
+  'Stadium_PHI.glb','Stadium_NYY.glb','Stadium_BOS.glb','Stadium_STL.glb',
+  'Stadium_SEA.glb','Stadium_CHC.glb','Stadium_HOU.glb','Stadium_TEX.glb',
+  'Stadium_ATL.glb','Stadium_BAL.glb','Stadium_CWS.glb','Stadium_CIN.glb',
+  'Stadium_CLE.glb','Stadium_COL.glb','Stadium_DET.glb','Stadium_KC.glb',
+  'Stadium_MIA.glb','Stadium_MIL.glb','Stadium_OAK.glb','Stadium_PIT.glb',
+  'Stadium_TB.glb','Stadium_SD.glb','Stadium_TOR.glb','Stadium_WSH.glb',
+  'Stadium_MIN.glb','Stadium_ARI.glb',
+];
+
+// ── RENDERER ────────────────────────────────────────────────────────────────
+const wrap = document.getElementById('canvasWrap');
+const W = () => wrap.clientWidth;
+const H = () => wrap.clientHeight;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(W(), H());
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.3;
+wrap.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbcdcf5); // fallback behind the sky dome
+scene.fog = null;
+
+const camera = new THREE.PerspectiveCamera(52, W()/H(), 0.5, 6000);
+camera.position.set(30, 80, 120);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.maxPolarAngle = Math.PI * 0.53;
+controls.minDistance = 5;
+controls.maxDistance = 2000;
+controls.target.set(0, 10, -200);
+controls.update();
+
+// ── LIGHTING ─────────────────────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0xd0e8ff, 0.8);
+scene.add(ambient);
+
+const sun = new THREE.DirectionalLight(0xfff8e7, 2.8);
+sun.position.set(100, 400, 150);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.near   = 1;
+sun.shadow.camera.far    = 2000;
+sun.shadow.camera.left   = sun.shadow.camera.bottom = -600;
+sun.shadow.camera.right  = sun.shadow.camera.top    =  600;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0x8fb8ff, 0.5);
+fill.position.set(-200, 100, -100);
+scene.add(fill);
+
+// ── SKY, CLOUDS & GROUND ─────────────────────────────────────────────────────
+const skyDome = new THREE.Mesh(
+  new THREE.SphereGeometry(4500, 32, 15),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    uniforms: {
+      cTop:     { value: new THREE.Color(0x2f7fd6) },
+      cHorizon: { value: new THREE.Color(0xcfe8ff) },
+      cGround:  { value: new THREE.Color(0xa8c8e8) },
+    },
+    vertexShader: `varying vec3 vDir;
+      void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform vec3 cTop; uniform vec3 cHorizon; uniform vec3 cGround;
+      varying vec3 vDir;
+      void main(){
+        float h = normalize(vDir).y;
+        vec3 col = h >= 0.0
+          ? mix(cHorizon, cTop, pow(min(h * 1.25, 1.0), 0.6))
+          : mix(cHorizon, cGround, min(-h * 3.0, 1.0));
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  })
+);
+skyDome.renderOrder = -10;
+scene.add(skyDome);
+
+// Soft billboard clouds
+function makeCloudTexture() {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const cx = cv.getContext('2d');
+  for (const [bx, by, br] of [[70,70,46],[120,58,52],[170,72,44],[105,82,38],[150,84,40]]) {
+    const g = cx.createRadialGradient(bx, by, 4, bx, by, br);
+    g.addColorStop(0,   'rgba(255,255,255,0.95)');
+    g.addColorStop(0.7, 'rgba(255,255,255,0.45)');
+    g.addColorStop(1,   'rgba(255,255,255,0)');
+    cx.fillStyle = g; cx.fillRect(0, 0, 256, 128);
+  }
+  return new THREE.CanvasTexture(cv);
+}
+const cloudTex = makeCloudTexture();
+const cloudSprites = [];
+for (let i = 0; i < 12; i++) {
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: cloudTex, transparent: true, opacity: 0.55 + Math.random() * 0.3, depthWrite: false,
+  }));
+  const ang = Math.random() * Math.PI * 2;
+  const r   = 1600 + Math.random() * 1700;
+  spr.position.set(Math.cos(ang) * r, 480 + Math.random() * 620, Math.sin(ang) * r);
+  const s = 380 + Math.random() * 520;
+  spr.scale.set(s, s * 0.42, 1);
+  cloudSprites.push(spr);
+  scene.add(spr);
+}
+
+
+// ── FIELD OVERLAY ────────────────────────────────────────────────────────────
+// All in feet. CF = -Z axis, RF = +X, LF = -X.
+function wallXZ(distFt, sprayDeg) {
+  const r = THREE.MathUtils.degToRad(sprayDeg);
+  return [distFt * Math.sin(r), -distFt * Math.cos(r)];
+}
+
+// ── FIELD OVERLAY GROUP ───────────────────────────────────────────────────────
+// All drawn field geometry lives here. y = -5.5 aligns it with the GLB field surface.
+const fieldOverlayGroup = new THREE.Group();
+fieldOverlayGroup.position.y = 0;
+scene.add(fieldOverlayGroup);
+
+function linePts(pts, color, opacity, parent) {
+  const vecs = pts.map(p => new THREE.Vector3(p[0], 0.25, p[1]));
+  const g = new THREE.BufferGeometry().setFromPoints(vecs);
+  const m = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  (parent || fieldOverlayGroup).add(new THREE.Line(g, m));
+}
+
+// Oracle Park wall points [dist, spray_deg]
+// ── STADIUM DIMENSIONS (all 30 MLB parks) ────────────────────────────────────
+// walls: [[dist_ft, spray_deg], ...] — straight line segments LF → CF → RF
+// Extra corner points added for walls with distinct straight sections or kinks.
+// Sources: Wikipedia park articles, Baseball Reference, official MLB diagrams.
+const STADIUM_DIMS = {
+  // ARI — gently rounded; slight CF push; RF line 4ft deeper than LF
+  'Stadium_ARI.glb': { name:'Chase Field', wallHeight:'7.5–25 ft',
+    sections:[
+      { name:'Left field',   pts:[[330,-45],[352,-36],[374,-27]] },
+      { name:'Left-center',  pts:[[374,-27],[393,-13],[407,  0]] },
+      { name:'Right-center', pts:[[407,  0],[393, 13],[374, 27]] },
+      { name:'Right field',  pts:[[374, 27],[342, 36],[334, 45]] },
+    ]},
+
+  // ATL — slightly deeper LF side
+  'Stadium_ATL.glb': { name:'Truist Park', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[335,-45],[360,-36],[385,-27]] },
+      { name:'Left-center',  pts:[[385,-27],[393,-13],[400,  0]] },
+      { name:'Right-center', pts:[[400,  0],[393, 13],[375, 27]] },
+      { name:'Right field',  pts:[[375, 27],[350, 36],[325, 45]] },
+    ]},
+
+  // BAL — straight walls; deep LC pocket at 410 ft (Camden Yards quirk)
+  'Stadium_BAL.glb': { name:'Oriole Park at Camden Yards', wallHeight:'7.5 ft',
+    sections:[
+      { name:'Left field',        pts:[[333,-45],[373,-32]] },
+      { name:'Left field corner', pts:[[373,-32],[376,-25]] },
+      { name:'Deep left-center',  pts:[[376,-25],[410,-12]] },
+      { name:'Center field',      pts:[[410,-12],[400,  0]] },
+      { name:'Right-center',      pts:[[400,  0],[373, 27]] },
+      { name:'Right field',       pts:[[373, 27],[318, 45]] },
+    ]},
+
+  // BOS — Green Monster: STRAIGHT wall 310→379; CF notch 390; Triangle at 420
+  'Stadium_BOS.glb': { name:'Fenway Park', wallHeight:'3–37 ft',
+    sections:[
+      { name:'Green Monster', pts:[[310,-45],[379,-17]] },
+      { name:'Center field',  pts:[[379,-17],[390,  0]] },
+      { name:'The Triangle',  pts:[[390,  0],[420, 10]] },
+      { name:'Right-center',  pts:[[420, 10],[380, 22]] },
+      { name:"Pesky's Pole",  pts:[[380, 22],[302, 45]] },
+    ]},
+
+  // CHC — long LF/RF lines; smooth arc to CF
+  'Stadium_CHC.glb': { name:'Wrigley Field', wallHeight:'11.5 ft',
+    sections:[
+      { name:'Left field',   pts:[[355,-45],[361,-36],[368,-27]] },
+      { name:'Left-center',  pts:[[368,-27],[388,-13],[400,  0]] },
+      { name:'Right-center', pts:[[400,  0],[388, 13],[368, 27]] },
+      { name:'Right field',  pts:[[368, 27],[363, 36],[353, 45]] },
+    ]},
+
+  // CWS — symmetrical, slight RF depth
+  'Stadium_CWS.glb': { name:'Guaranteed Rate Field', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[330,-45],[353,-36],[375,-27]] },
+      { name:'Left-center',  pts:[[375,-27],[393,-13],[400,  0]] },
+      { name:'Right-center', pts:[[400,  0],[393, 13],[375, 27]] },
+      { name:'Right field',  pts:[[375, 27],[353, 36],[335, 45]] },
+    ]},
+
+  // CIN — LCF 379; RCF 370
+  'Stadium_CIN.glb': { name:'Great American Ball Park', wallHeight:'8–12 ft',
+    sections:[
+      { name:'Left field',   pts:[[328,-45],[353,-36],[379,-27]] },
+      { name:'Left-center',  pts:[[379,-27],[393,-13],[404,  0]] },
+      { name:'Right-center', pts:[[404,  0],[390, 13],[370, 27]] },
+      { name:'Right field',  pts:[[370, 27],[347, 36],[325, 45]] },
+    ]},
+
+  // CLE — LF/RF 325; CF 400; slight asymmetry
+  'Stadium_CLE.glb': { name:'Progressive Field', wallHeight:'9–19 ft',
+    sections:[
+      { name:'Left field',   pts:[[325,-45],[348,-36],[370,-27]] },
+      { name:'Left-center',  pts:[[370,-27],[389,-13],[400,  0]] },
+      { name:'Right-center', pts:[[400,  0],[391, 13],[375, 27]] },
+      { name:'Right field',  pts:[[375, 27],[350, 36],[325, 45]] },
+    ]},
+
+  // COL — large, deep; slight LF/CF asymmetry
+  'Stadium_COL.glb': { name:'Coors Field', wallHeight:'8–14 ft',
+    sections:[
+      { name:'Left field',   pts:[[347,-45],[369,-36],[390,-27]] },
+      { name:'Left-center',  pts:[[390,-27],[406,-13],[415,  0]] },
+      { name:'Right-center', pts:[[415,  0],[398, 13],[375, 27]] },
+      { name:'Right field',  pts:[[375, 27],[363, 36],[350, 45]] },
+    ]},
+
+  // DET — LF 342; CF 412 (moved in 2023)
+  'Stadium_DET.glb': { name:'Comerica Park', wallHeight:'8.5 ft',
+    sections:[
+      { name:'Left field',   pts:[[342,-45],[357,-36],[370,-27]] },
+      { name:'Left-center',  pts:[[370,-27],[395,-13],[412,  0]] },
+      { name:'Right-center', pts:[[412,  0],[393, 13],[365, 27]] },
+      { name:'Right field',  pts:[[365, 27],[347, 36],[330, 45]] },
+    ]},
+
+  // HOU — irregular angles; deep LC and RC pockets
+  'Stadium_HOU.glb': { name:'Daikin Park', wallHeight:'7–25 ft',
+    sections:[
+      { name:'Left field',        pts:[[315,-45],[362,-27]] },
+      { name:'Deep left-center',  pts:[[362,-27],[399,-12]] },
+      { name:'Center field',      pts:[[399,-12],[409,  0]] },
+      { name:'Deep right-center', pts:[[409,  0],[408, 12]] },
+      { name:'Right field',       pts:[[408, 12],[370, 27],[326, 45]] },
+    ]},
+
+  // KC — symmetric rounded; power alleys at 387
+  'Stadium_KC.glb':  { name:'Kauffman Stadium', wallHeight:'8.5 ft',
+    sections:[
+      { name:'Left field',   pts:[[330,-45],[359,-36],[387,-27]] },
+      { name:'Left-center',  pts:[[387,-27],[400,-13],[410,  0]] },
+      { name:'Right-center', pts:[[410,  0],[400, 13],[387, 27]] },
+      { name:'Right field',  pts:[[387, 27],[359, 36],[330, 45]] },
+    ]},
+
+  // LAA — deeper LC than RC
+  'Stadium_LAA.glb': { name:'Angel Stadium', wallHeight:'8–18 ft',
+    sections:[
+      { name:'Left field',   pts:[[330,-45],[359,-36],[387,-27]] },
+      { name:'Left-center',  pts:[[387,-27],[393,-13],[396,  0]] },
+      { name:'Right-center', pts:[[396,  0],[385, 13],[370, 27]] },
+      { name:'Right field',  pts:[[370, 27],[350, 36],[330, 45]] },
+    ]},
+
+  // LAD — symmetric; power alleys at 385
+  'Stadium_LAD.glb': { name:'Dodger Stadium', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[330,-45],[358,-36],[385,-27]] },
+      { name:'Left-center',  pts:[[385,-27],[391,-13],[395,  0]] },
+      { name:'Right-center', pts:[[395,  0],[391, 13],[385, 27]] },
+      { name:'Right field',  pts:[[385, 27],[358, 36],[330, 45]] },
+    ]},
+
+  // MIA — asymmetric; deeper RC than LC
+  'Stadium_MIA.glb': { name:'LoanDepot Park', wallHeight:'7–10 ft',
+    sections:[
+      { name:'Left field',   pts:[[344,-45],[365,-36],[386,-27]] },
+      { name:'Left-center',  pts:[[386,-27],[398,-13],[407,  0]] },
+      { name:'Right-center', pts:[[407,  0],[400, 13],[392, 27]] },
+      { name:'Right field',  pts:[[392, 27],[364, 36],[335, 45]] },
+    ]},
+
+  // MIL — LF 342; RF 337
+  'Stadium_MIL.glb': { name:'American Family Field', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[342,-45],[357,-36],[371,-27]] },
+      { name:'Left-center',  pts:[[371,-27],[389,-13],[400,  0]] },
+      { name:'Right-center', pts:[[400,  0],[387, 13],[374, 27]] },
+      { name:'Right field',  pts:[[374, 27],[353, 36],[337, 45]] },
+    ]},
+
+  // MIN — asymmetric; deeper LF side
+  'Stadium_MIN.glb': { name:'Target Field', wallHeight:'8–23 ft',
+    sections:[
+      { name:'Left field',   pts:[[339,-45],[358,-36],[377,-27]] },
+      { name:'Left-center',  pts:[[377,-27],[393,-13],[404,  0]] },
+      { name:'Right-center', pts:[[404,  0],[390, 13],[367, 27]] },
+      { name:'Right field',  pts:[[367, 27],[348, 36],[328, 45]] },
+    ]},
+
+  // NYM — shallow LCF (358) vs deep CF (408)
+  'Stadium_NYM.glb': { name:'Citi Field', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[335,-45],[347,-36],[358,-27]] },
+      { name:'Left-center',  pts:[[358,-27],[386,-13],[408,  0]] },
+      { name:'Right-center', pts:[[408,  0],[395, 13],[375, 27]] },
+      { name:'Right field',  pts:[[375, 27],[353, 36],[330, 45]] },
+    ]},
+
+  // NYY — very deep LC (399)
+  'Stadium_NYY.glb': { name:'Yankee Stadium', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[318,-45],[359,-36],[399,-27]] },
+      { name:'Left-center',  pts:[[399,-27],[405,-13],[408,  0]] },
+      { name:'Right-center', pts:[[408,  0],[396, 13],[385, 27]] },
+      { name:'Right field',  pts:[[385, 27],[350, 36],[314, 45]] },
+    ]},
+
+  // OAK — Sutter Health Park, Sacramento
+  'Stadium_OAK.glb': { name:'Sutter Health Park', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[330,-45],[350,-36],[370,-27]] },
+      { name:'Left-center',  pts:[[370,-27],[389,-13],[403,  0]] },
+      { name:'Right-center', pts:[[403,  0],[389, 13],[375, 27]] },
+      { name:'Right field',  pts:[[375, 27],[352, 36],[325, 45]] },
+    ]},
+
+  // PHI — slightly asymmetric
+  'Stadium_PHI.glb': { name:'Citizens Bank Park', wallHeight:'8–13 ft',
+    sections:[
+      { name:'Left field',   pts:[[329,-45],[352,-36],[374,-27]] },
+      { name:'Left-center',  pts:[[374,-27],[390,-13],[401,  0]] },
+      { name:'Right-center', pts:[[401,  0],[387, 13],[369, 27]] },
+      { name:'Right field',  pts:[[369, 27],[350, 36],[330, 45]] },
+    ]},
+
+  // PIT — LCF 383
+  'Stadium_PIT.glb': { name:'PNC Park', wallHeight:'6–21 ft',
+    sections:[
+      { name:'Left field',   pts:[[325,-45],[354,-36],[383,-27]] },
+      { name:'Left-center',  pts:[[383,-27],[393,-13],[399,  0]] },
+      { name:'Right-center', pts:[[399,  0],[390, 13],[375, 27]] },
+      { name:'Right field',  pts:[[375, 27],[348, 36],[320, 45]] },
+    ]},
+
+  // SD — Western Metal Supply Co. at LF corner; RF alley unusually deep (391)
+  'Stadium_SD.glb':  { name:'Petco Park', wallHeight:'8 ft',
+    sections:[
+      { name:'Western Metal Supply Co.', pts:[[336,-45],[361,-36],[386,-27]] },
+      { name:'Left-center',             pts:[[386,-27],[392,-13],[396,  0]] },
+      { name:'Right-center',            pts:[[396,  0],[393, 13],[391, 27]] },
+      { name:'Right field',             pts:[[391, 27],[382, 36],[331, 45]] },
+    ]},
+
+  // SF — CF notch (391) between LCF (399) and Triples Alley (415); short RF line (309)
+  'Stadium_SF.glb':  { name:'Oracle Park', wallHeight:'8–25 ft',
+    sections:[
+      { name:'Left field line',    pts:[[339,-45],[354,-30]] },
+      { name:'Left-center',        pts:[[354,-30],[399,-15]] },
+      { name:'Center field notch', pts:[[399,-15],[391,  0]] },
+      { name:'Triples Alley',      pts:[[391,  0],[415, 18]] },
+      { name:'Right-center',       pts:[[415, 18],[365, 30]] },
+      { name:'Right field line',   pts:[[365, 30],[309, 45]] },
+    ]},
+
+  // SEA — slight RC depth
+  'Stadium_SEA.glb': { name:'T-Mobile Park', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[331,-45],[355,-36],[378,-27]] },
+      { name:'Left-center',  pts:[[378,-27],[393,-13],[401,  0]] },
+      { name:'Right-center', pts:[[401,  0],[388, 13],[381, 27]] },
+      { name:'Right field',  pts:[[381, 27],[354, 36],[326, 45]] },
+    ]},
+
+  // STL — symmetric; standard shape
+  'Stadium_STL.glb': { name:'Busch Stadium', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[336,-45],[356,-36],[375,-27]] },
+      { name:'Left-center',  pts:[[375,-27],[391,-13],[400,  0]] },
+      { name:'Right-center', pts:[[400,  0],[391, 13],[375, 27]] },
+      { name:'Right field',  pts:[[375, 27],[355, 36],[335, 45]] },
+    ]},
+
+  // TB — asymmetric (LF 315, RF 322)
+  'Stadium_TB.glb':  { name:'Tropicana Field', wallHeight:'9.5 ft',
+    sections:[
+      { name:'Left field',   pts:[[315,-45],[343,-36],[370,-27]] },
+      { name:'Left-center',  pts:[[370,-27],[390,-13],[404,  0]] },
+      { name:'Right-center', pts:[[404,  0],[383, 13],[370, 27]] },
+      { name:'Right field',  pts:[[370, 27],[346, 36],[322, 45]] },
+    ]},
+
+  // TEX — deep CF; slight asymmetry
+  'Stadium_TEX.glb': { name:'Globe Life Field', wallHeight:'8 ft',
+    sections:[
+      { name:'Left field',   pts:[[329,-45],[351,-36],[372,-27]] },
+      { name:'Left-center',  pts:[[372,-27],[392,-13],[407,  0]] },
+      { name:'Right-center', pts:[[407,  0],[387, 13],[374, 27]] },
+      { name:'Right field',  pts:[[374, 27],[350, 36],[326, 45]] },
+    ]},
+
+  // TOR — LC 368; LC power alley 381; CF 400; RC power alley 372; RC 359
+  'Stadium_TOR.glb': { name:'Rogers Centre', wallHeight:'8–14 ft',
+    sections:[
+      { name:'Left field',   pts:[[328,-45],[348,-36],[368,-27]] },
+      { name:'Left-center',  pts:[[368,-27],[381,-13],[400,  0]] },
+      { name:'Right-center', pts:[[400,  0],[372, 13],[359, 27]] },
+      { name:'Right field',  pts:[[359, 27],[344, 36],[328, 45]] },
+    ]},
+
+  // WSH — slight LF depth
+  'Stadium_WSH.glb': { name:'Nationals Park', wallHeight:'8–10 ft',
+    sections:[
+      { name:'Left field',   pts:[[337,-45],[357,-36],[377,-27]] },
+      { name:'Left-center',  pts:[[377,-27],[392,-13],[402,  0]] },
+      { name:'Right-center', pts:[[402,  0],[384, 13],[370, 27]] },
+      { name:'Right field',  pts:[[370, 27],[352, 36],[335, 45]] },
+    ]},
+};
+
+// Extract flat [dist,angle] vertex list from sections format
+// (distances scaled to the active field scale — charted dims are MLB-sized)
+function getWallPts(dims) {
+  const raw = dims.sections
+    ? (() => {
+        const pts = [];
+        for (let i = 0; i < dims.sections.length; i++) {
+          const sp = dims.sections[i].pts;
+          for (let j = (i === 0 ? 0 : 1); j < sp.length; j++) pts.push(sp[j]);
+        }
+        return pts;
+      })()
+    : (dims.walls || []);
+  return fieldScale === 1 ? raw : raw.map(([d, s]) => [d * fieldScale, s]);
+}
+
+// Physical linear wall length (ft) of a single section
+function sectionPhysicalLength(sec) {
+  let total = 0;
+  for (let i = 1; i < sec.pts.length; i++) {
+    const [x1,z1] = wallXZ(sec.pts[i-1][0], sec.pts[i-1][1]);
+    const [x2,z2] = wallXZ(sec.pts[i][0],   sec.pts[i][1]);
+    total += Math.hypot(x2-x1, z2-z1);
+  }
+  return Math.round(total);
+}
+
+// ── MODEL-SAMPLED WALL PROFILE ───────────────────────────────────────────────
+// Raycasts the actual GLB geometry from home plate outward (−45°…+45°, 1° steps)
+// to recover the real fence: base distance AND wall height at every degree.
+// The drawn overlay + physics spline + HR check then mimic the model exactly.
+const WALL_SAMPLE_MIN_D = 225;  // ft — ignore infield/mound geometry
+const WALL_SAMPLE_MAX_D = 600;  // ft — ignore stands far behind the fence
+const WALL_SAMPLE_TOL   = 8;    // ft — higher hit within base+tol = same wall face
+                                //      (kept tight so the probe doesn't climb bleachers behind the fence)
+const wallProfileCache    = {};  // sig → profile array | false (tracing failed)
+const wallProfileInFlight = {};  // sig → true while an async trace is running
+let   activeWallProfile   = null; // profile of the currently displayed stadium
+const _wpOrigin = new THREE.Vector3(), _wpDir = new THREE.Vector3();
+
+// Cache key: filename + world position + scale, so recalibration re-traces.
+function wallProfileSig(filename) {
+  const entry = cache[filename];
+  if (!entry) return null;
+  const p = entry.grp.position, sc = entry.grp.scale.x;
+  return filename + '|' + p.x.toFixed(1) + ',' + p.y.toFixed(1) + ',' + p.z.toFixed(1) + '|' + sc.toFixed(3);
+}
+
+function getWallProfile(filename) {
+  const sig = wallProfileSig(filename);
+  return (sig && wallProfileCache[sig]) || null;
+}
+
+function probeWallDist(deg, y, minD) {
+  const r = deg * Math.PI / 180;
+  _wpOrigin.set(0, y, 0);
+  _wpDir.set(Math.sin(r), 0, -Math.cos(r));
+  meshRC.set(_wpOrigin, _wpDir);
+  meshRC.near = minD; meshRC.far = WALL_SAMPLE_MAX_D * fieldScale;
+  let best = Infinity;
+  for (const mesh of collisionMeshes) {
+    const hits = meshRC.intersectObject(mesh, false);
+    for (const h of hits) if (h.distance < best) best = h.distance;
+  }
+  return isFinite(best) ? best : null;
+}
+
+function sampleOneWallAngle(deg) {
+  // All probe distances/heights scale with the field so youth fences trace too
+  const k = fieldScale;
+  const minD = WALL_SAMPLE_MIN_D * k;
+  const tol  = Math.max(3, WALL_SAMPLE_TOL * k);
+  // Base distance — probe low first, step up if the low ray slips through a gap
+  let d = null, yHit = 3 * k;
+  for (const y of [3 * k, 6 * k, 10 * k]) { d = probeWallDist(deg, y, minD); if (d != null) { yHit = y; break; } }
+  if (d == null) return null;
+  // Wall height — binary-search the top of the face (hit stays within base+tol)
+  const hitsAt = y => { const dh = probeWallDist(deg, y, Math.max(minD, d - 10 * k)); return dh != null && dh <= d + tol; };
+  let lo = yHit, hi = 48 * k;
+  while (hi - lo > 0.5) { const mid = (lo + hi) / 2; if (hitsAt(mid)) lo = mid; else hi = mid; }
+  const [x, z] = wallXZ(d, deg);
+  return { deg, dist: d, h: Math.max(3 * k, Math.round(lo * 2) / 2), x, z };
+}
+
+// Async fence tracer — samples a few angles per frame (≤8 ms budget) so the UI
+// never freezes, then rebuilds the overlay with the traced profile. The charted
+// fallback fence is shown while the trace runs.
+function sampleWallProfileAsync(filename) {
+  const sig = wallProfileSig(filename);
+  if (!sig || collisionMeshes.length === 0) return;
+  if (sig in wallProfileCache || wallProfileInFlight[sig]) return;
+  wallProfileInFlight[sig] = true;
+
+  const samples = [];
+  let deg = -45;
+  const t0 = performance.now();
+
+  function chunk() {
+    // Abort if the stadium switched or was recalibrated mid-trace
+    if (activeFilename !== filename || wallProfileSig(filename) !== sig) {
+      delete wallProfileInFlight[sig];
+      return;
+    }
+    const start = performance.now();
+    while (deg <= 45 && performance.now() - start < 8) {
+      samples.push(sampleOneWallAngle(deg));
+      deg++;
+    }
+    if (deg <= 45) { requestAnimationFrame(chunk); return; }
+
+    delete wallProfileInFlight[sig];
+    const valid = samples.filter(Boolean).length;
+    console.log('wall trace ' + filename + ': ' + valid + '/' + samples.length + ' angles hit, ' +
+                collisionMeshes.length + ' meshes, ' + Math.round(performance.now() - t0) + ' ms');
+
+    if (valid < samples.length * 0.6) {
+      wallProfileCache[sig] = false;
+      if (activeFilename === filename) buildWallOverlay(filename); // update footer status
+      return;
+    }
+    // Outlier rejection — a sample far BELOW its neighbours is a foul-side
+    // railing/camera-well clip, not the fence. (Far-above pockets are kept:
+    // genuine fence gaps the ball can fly through.)
+    for (let i = 0; i < samples.length; i++) {
+      if (!samples[i]) continue;
+      const win = [];
+      for (let j = Math.max(0, i-3); j <= Math.min(samples.length-1, i+3); j++)
+        if (j !== i && samples[j]) win.push(samples[j].dist);
+      if (win.length < 2) continue;
+      win.sort((a,b) => a-b);
+      const med = win[Math.floor(win.length/2)];
+      if (samples[i].dist < med - 35 * fieldScale) samples[i] = null;
+    }
+    // Patch gaps by linear interpolation between neighbouring hits
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i]) continue;
+      let a = i - 1; while (a >= 0 && !samples[a]) a--;
+      let b = i + 1; while (b < samples.length && !samples[b]) b++;
+      const sa = samples[a] || samples[b], sb = samples[b] || samples[a];
+      const t  = (b === a || a < 0 || b >= samples.length) ? 0 : (i - a) / (b - a);
+      const dg   = -45 + i;
+      const dist = sa.dist + (sb.dist - sa.dist) * t;
+      const h    = sa.h    + (sb.h    - sa.h)    * t;
+      const [x, z] = wallXZ(dist, dg);
+      samples[i] = { deg: dg, dist, h, x, z };
+    }
+    wallProfileCache[sig] = samples;
+    if (activeFilename === filename) buildWallOverlay(filename); // redraw with the traced fence
+  }
+  requestAnimationFrame(chunk);
+}
+
+// Linear interpolation over the sampled profile (deg clamped to −45…+45, 1°-indexed)
+function profileAt(profile, deg) {
+  const c = Math.min(45, Math.max(-45, deg));
+  const i = Math.min(profile.length - 2, Math.max(0, Math.floor(c + 45)));
+  const t = c + 45 - i;
+  const a = profile[i], b = profile[i + 1];
+  return { dist: a.dist + (b.dist - a.dist) * t, h: a.h + (b.h - a.h) * t };
+}
+
+function wallHeightAtAngle(sprayDeg) {
+  if (!activeWallProfile) return WALL_HEIGHT;
+  return profileAt(activeWallProfile, sprayDeg).h;
+}
+
+// ── DYNAMIC WALL OVERLAY ──────────────────────────────────────────────────────
+// Group rebuilt on every stadium switch; lives inside fieldOverlayGroup.
+const wallOverlayGroup = new THREE.Group();
+fieldOverlayGroup.add(wallOverlayGroup);
+let wallArcLine  = null;
+let wallSplinePts = []; // XZ points of the fence spline — used for physics collision
+const foulLines = [];
+
+function buildWallOverlay(filename) {
+  // Clear previous overlay contents
+  while (wallOverlayGroup.children.length) {
+    const child = wallOverlayGroup.children[0];
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) { if (child.material.map) child.material.map.dispose(); child.material.dispose(); }
+    wallOverlayGroup.remove(child);
+  }
+  wallArcLine = null;
+  foulLines.length = 0;
+  activeWallProfile = null;
+
+  const dims = STADIUM_DIMS[filename];
+  if (!dims) return;
+
+  const t       = TEAM_COLORS[filename] || { primary:0xfbbf24, secondary:0xfbbf24 };
+  const priCol  = new THREE.Color(t.primary);
+  const secCol  = new THREE.Color(t.secondary);
+  const priHex  = '#' + priCol.getHexString();
+  const secHex  = '#' + secCol.getHexString();
+
+  // ── Fence geometry: model-traced profile (exact) or charted dims (fallback) ──
+  activeWallProfile = getWallProfile(filename);
+  if (!activeWallProfile) sampleWallProfileAsync(filename); // traces in background, redraws when done
+  const profile = activeWallProfile;
+  const wallPts = getWallPts(dims); // canonical marker angles (and fallback shape)
+
+  // No drawn fence — the GLB model's own walls are the visual walls.
+  // The traced profile still feeds the physics spline + HR clearance check.
+  if (profile) {
+    wallSplinePts = profile.map(p => ({ x: p.x, z: p.z }));
+  } else {
+    wallSplinePts = wallPts.map(([d,s]) => {
+      const [x,z] = wallXZ(d,s);
+      return { x, z };
+    });
+  }
+
+  // ── Foul lines ──
+  const lfDist = (profile ? profileAt(profile, -45).dist : wallPts[0][0]) + 60;
+  const rfDist = (profile ? profileAt(profile,  45).dist : wallPts[wallPts.length - 1][0]) + 60;
+  [[lfDist,-45],[rfDist,45]].forEach(([d,s]) => {
+    const [x,z] = wallXZ(d,s);
+    const vecs  = [new THREE.Vector3(0,0.25,0), new THREE.Vector3(x,0.25,z)];
+    const mat   = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+    const line  = new THREE.Line(new THREE.BufferGeometry().setFromPoints(vecs), mat);
+    wallOverlayGroup.add(line);
+    foulLines.push(line);
+  });
+
+  // ── Distance poles + labels (placed ON the drawn wall) ──
+  wallPts.forEach(([dChart, s]) => {
+    const q    = profile ? profileAt(profile, s) : { dist: dChart, h: 10 };
+    const d    = Math.round(q.dist);
+    const topY = profile ? q.h : 10;
+    const [x,z] = wallXZ(q.dist, s);
+    // Pole — wall foot up past the wall top
+    const pole = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x,0.2,z), new THREE.Vector3(x,topY+6,z)]),
+      new THREE.LineBasicMaterial({ color: secCol, opacity: 0.75, transparent: true })
+    );
+    wallOverlayGroup.add(pole);
+    // Label sprite — distance plus measured wall height
+    const cv = document.createElement('canvas'); cv.width=160; cv.height=84;
+    const cx = cv.getContext('2d');
+    cx.textAlign = 'center'; cx.textBaseline = 'middle';
+    cx.font = "bold 26px 'Courier New'";
+    cx.fillStyle = secHex;
+    cx.fillText(d + "'", 80, 26);
+    if (profile) {
+      cx.font = "bold 17px 'Courier New'";
+      cx.fillStyle = '#94a3b8';
+      cx.fillText(Math.round(topY) + ' ft wall', 80, 58);
+    }
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthTest: false }));
+    spr.scale.set(20, 10.5, 1);
+    spr.position.set(x, topY + 14, z);
+    wallOverlayGroup.add(spr);
+  });
+
+  // ── UI dimensions panel ──
+  const rows = dims.sections.map(sec => {
+    const a0 = sec.pts[0][1], aN = sec.pts[sec.pts.length - 1][1];
+    let distTxt, wallTxt;
+    if (profile) {
+      const d0 = Math.round(profileAt(profile, a0).dist);
+      const dN = Math.round(profileAt(profile, aN).dist);
+      let hMin = Infinity, hMax = -Infinity;
+      profile.forEach(p => {
+        if (p.deg < Math.min(a0,aN) || p.deg > Math.max(a0,aN)) return;
+        hMin = Math.min(hMin, p.h); hMax = Math.max(hMax, p.h);
+      });
+      distTxt = `${d0}–${dN} ft`;
+      wallTxt = Math.round(hMin) === Math.round(hMax)
+        ? `${Math.round(hMin)} ft wall`
+        : `${Math.round(hMin)}–${Math.round(hMax)} ft wall`;
+    } else {
+      distTxt = `${sec.pts[0][0]}–${sec.pts[sec.pts.length-1][0]} ft`;
+      wallTxt = `~${sectionPhysicalLength(sec)} ft wall`;
+    }
+    return `<div style="color:${secHex};font-weight:bold;white-space:nowrap">${sec.name}</div>` +
+           `<div style="white-space:nowrap">${distTxt} <span style="color:#475569">${wallTxt}</span></div>`;
+  }).join('');
+
+  let footer;
+  if (profile) {
+    const hMin = Math.round(Math.min(...profile.map(p => p.h)));
+    const hMax = Math.round(Math.max(...profile.map(p => p.h)));
+    const deep = profile.reduce((m,p) => p.dist > m.dist ? p : m);
+    footer =
+      `<div class="mt-2 text-slate-400 text-xs">Wall height: <span style="color:${secHex}">${hMin === hMax ? hMin : hMin + '–' + hMax} ft</span>` +
+      ` · Deepest: <span style="color:${secHex}">${Math.round(deep.dist)} ft</span> @ ${deep.deg >= 0 ? '+' : ''}${deep.deg}°</div>` +
+      `<div class="text-slate-600 text-xs mt-0.5">✓ fence traced from 3-D model (${profile.length} pts)</div>`;
+  } else {
+    const tracing = wallProfileInFlight[wallProfileSig(filename)];
+    footer =
+      `<div class="mt-2 text-slate-400 text-xs">Wall height: <span style="color:${secHex}">${dims.wallHeight}</span></div>` +
+      `<div class="text-slate-600 text-xs mt-0.5">${tracing ? '⟳ tracing fence from 3-D model…' : 'charted dims — model fence not traceable'}</div>`;
+  }
+  document.getElementById('wallDimsPanel').innerHTML =
+    `<div style="color:${priHex}" class="font-bold mb-1.5 tracking-widest text-xs">${dims.name.toUpperCase()}</div>` +
+    `<div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">${rows}</div>` + footer;
+  renderChart(); // spray chart draws the current stadium's fence
+}
+
+// Baseball diamond (90ft bases, -90deg yaw: 1st=+X, 3rd=-X)
+// Lives in its own group so FIELD SCALE can shrink base paths (90 → 80 → 60 ft).
+// Home plate, batter's boxes and the strike zone stay regulation size.
+const diamondGroup = new THREE.Group();
+fieldOverlayGroup.add(diamondGroup);
+const D = 63.64;
+const basePts = [[0,0],[D,-D],[0,-D*2],[-D,-D],[0,0]];
+linePts(basePts, 0x9db5c8, 0.35, diamondGroup);  // soft blue-white, reduced opacity
+[[D,-D],[0,-D*2],[-D,-D]].forEach(([x,z]) => {
+  const pad = new THREE.Mesh(
+    new THREE.BoxGeometry(1.5,0.15,1.5),
+    new THREE.MeshStandardMaterial({ color:0xddeeff, emissive:0x334455, emissiveIntensity:0.4 })
+  );
+  pad.position.set(x, 0.1, z);
+  diamondGroup.add(pad);
+});
+
+// Home plate
+const ps = new THREE.Shape();
+ps.moveTo(-0.72,-0.86); ps.lineTo(0.72,-0.86);
+ps.lineTo(0.72,0); ps.lineTo(0,0.45); ps.lineTo(-0.72,0); ps.closePath();
+const plate = new THREE.Mesh(
+  new THREE.ShapeGeometry(ps),
+  new THREE.MeshStandardMaterial({color:0xddeeff, emissive:0x445566, emissiveIntensity:0.3})
+);
+plate.rotation.set(-Math.PI/2, Math.PI, 0); plate.position.y = 0.2;
+fieldOverlayGroup.add(plate);
+
+// Pitcher's mound
+const mound = new THREE.Mesh(
+  new THREE.CircleGeometry(9,32),
+  new THREE.MeshStandardMaterial({color:0x6b4c10, roughness:1, transparent:true, opacity:0.55})
+);
+mound.rotation.x = -Math.PI/2; mound.position.set(0,0.12,-60.5);
+diamondGroup.add(mound);
+const rubber = new THREE.Mesh(
+  new THREE.BoxGeometry(2,0.15,0.5),
+  new THREE.MeshStandardMaterial({color:0xddeeff, emissive:0x334455, emissiveIntensity:0.3})
+);
+rubber.position.set(0,0.18,-60.5);
+diamondGroup.add(rubber);
+
+// Batter's boxes — subtle chalky lines
+function bBox(x1,z1,x2,z2) {
+  linePts([[x1,z1],[x2,z1],[x2,z2],[x1,z2],[x1,z1]], 0x8aaabb, 0.22);
+}
+bBox(-3.5,-3,-0.72,5.5);
+bBox(0.72,-3,3.5,5.5);
+
+// Strike zone — home plate width (1.44 ft), standard 2 ft height, at z=1.5
+const SZ_W = 1.44;
+const SZ_H = 2.0;
+const SZ_Y = 2.5;
+const SZ_Z = -1.5;
+// Active zone bounds — rescaled to the active player's height (knees → mid chest)
+let zoneBot = SZ_Y - SZ_H/2, zoneTop = SZ_Y + SZ_H/2;
+const szGeo = new THREE.PlaneGeometry(SZ_W, SZ_H);
+const szFill = new THREE.Mesh(szGeo,
+  new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.06, side:THREE.DoubleSide, depthWrite:false })
+);
+szFill.position.set(0, SZ_Y, SZ_Z);
+szFill.rotation.y = Math.PI;
+fieldOverlayGroup.add(szFill);
+const szEdges = new THREE.LineSegments(
+  new THREE.EdgesGeometry(szGeo),
+  new THREE.LineBasicMaterial({ color:0x00eeff, transparent:true, opacity:0.9 })
+);
+szEdges.position.set(0, SZ_Y, SZ_Z);
+szEdges.rotation.y = Math.PI;
+fieldOverlayGroup.add(szEdges);
+const kneeBar = new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-SZ_W/2,0,0), new THREE.Vector3(SZ_W/2,0,0)]),
+  new THREE.LineBasicMaterial({ color:0x00eeff, transparent:true, opacity:0.5 })
+);
+kneeBar.rotation.y = Math.PI;
+kneeBar.position.set(0, SZ_Y - SZ_H/2, SZ_Z);
+fieldOverlayGroup.add(kneeBar);
+
+// Origin pulse ring
+const originRingMesh = new THREE.Mesh(
+  new THREE.RingGeometry(2,3,48),
+  new THREE.MeshBasicMaterial({color:0x0ea5e9, side:THREE.DoubleSide, transparent:true, opacity:0.5})
+);
+originRingMesh.rotation.x = -Math.PI/2; originRingMesh.position.y = 0.08;
+fieldOverlayGroup.add(originRingMesh);
+
+// Axes helper
+fieldOverlayGroup.add(new THREE.AxesHelper(25));
+
+// ── BALL ─────────────────────────────────────────────────────────────────────
+const ball = new THREE.Mesh(
+  new THREE.SphereGeometry(0.15, 20, 20),
+  new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.5, emissive:0xbbbbbb, emissiveIntensity:0.2})
+);
+ball.castShadow = true; ball.visible = false;
+scene.add(ball);
+
+const gc = document.createElement('canvas'); gc.width = gc.height = 64;
+const gx = gc.getContext('2d');
+const gg = gx.createRadialGradient(32,32,0,32,32,32);
+gg.addColorStop(0,'rgba(255,240,160,1)'); gg.addColorStop(1,'rgba(255,120,0,0)');
+gx.fillStyle=gg; gx.fillRect(0,0,64,64);
+const ballGlow = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(gc), transparent:true, blending:THREE.AdditiveBlending}));
+ballGlow.scale.set(7,7,1); ballGlow.visible=false;
+scene.add(ballGlow);
+
+const ballShadow = new THREE.Mesh(new THREE.CircleGeometry(0.8,16), new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.35}));
+ballShadow.rotation.x=-Math.PI/2; ballShadow.position.y=0.07; ballShadow.visible=false;
+scene.add(ballShadow);
+
+// ── TRAIL ─────────────────────────────────────────────────────────────────────
+const trailBuf = new Float32Array(TRAIL_MAX * 3);
+let trailN = 0;
+const trailGeo = new LineGeometry();
+trailGeo.setPositions([0,0,0, 0,0.01,0]);
+
+// Solid core line — always visible regardless of background
+const trailMat = new LineMaterial({
+  color: 0xff7700, linewidth: 4,
+  transparent: false,
+  resolution: new THREE.Vector2(W(), H()),
+  depthTest: true,
+});
+const trailLine = new Line2(trailGeo, trailMat);
+trailLine.computeLineDistances();
+scene.add(trailLine);
+
+// Wide glow halo on top — additive for neon bloom effect
+const trailGlowMat = new LineMaterial({
+  color: 0xffcc44, linewidth: 12,
+  transparent: true, opacity: 0.22,
+  blending: THREE.AdditiveBlending,
+  resolution: new THREE.Vector2(W(), H()),
+  depthTest: false,
+});
+const trailGlow = new Line2(trailGeo, trailGlowMat);
+trailGlow.computeLineDistances();
+scene.add(trailGlow);
+
+function trailReset() {
+  trailN = 0;
+  trailGeo.setPositions([0,0,0, 0,0.01,0]);
+  trailLine.computeLineDistances();
+  trailGlow.computeLineDistances();
+}
+function trailPush(x,y,z) {
+  if (trailN >= TRAIL_MAX) return;
+  trailBuf[trailN*3] = x; trailBuf[trailN*3+1] = y; trailBuf[trailN*3+2] = z;
+  trailN++;
+  if (trailN >= 2) {
+    const pts = trailBuf.subarray(0, trailN*3);
+    trailGeo.setPositions(pts);
+    trailLine.computeLineDistances();
+    trailGlow.computeLineDistances();
+  }
+}
+
+// ── TRACER PARTICLES ──────────────────────────────────────────────────────────
+const TRACER_STEP = 4; // drop a dot every N sim frames
+const tracerBuf = new Float32Array(TRAIL_MAX * 3);
+let tracerN = 0, tracerFrame = 0;
+const tracerGeo = new THREE.BufferGeometry();
+tracerGeo.setAttribute('position', new THREE.BufferAttribute(tracerBuf, 3));
+const tracerMat = new THREE.PointsMaterial({
+  color: 0xffee22, size: 2.8, sizeAttenuation: true,
+  transparent: true, opacity: 0.85,
+  blending: THREE.AdditiveBlending, depthWrite: false,
+});
+const tracerPts = new THREE.Points(tracerGeo, tracerMat);
+scene.add(tracerPts);
+
+function tracerReset() {
+  tracerN = 0; tracerFrame = 0;
+  tracerGeo.setDrawRange(0, 0);
+}
+function tracerPush(x, y, z) {
+  if (++tracerFrame % TRACER_STEP !== 0 || tracerN >= TRAIL_MAX) return;
+  tracerBuf[tracerN*3] = x; tracerBuf[tracerN*3+1] = y; tracerBuf[tracerN*3+2] = z;
+  tracerN++;
+  tracerGeo.attributes.position.needsUpdate = true;
+  tracerGeo.setDrawRange(0, tracerN);
+}
+
+// ── LANDING MARKER ────────────────────────────────────────────────────────────
+const landGroup = new THREE.Group(); scene.add(landGroup);
+const landCone = new THREE.Mesh(new THREE.ConeGeometry(0,3.5,8), new THREE.MeshBasicMaterial({color:0xff9900,transparent:true,opacity:0.85}));
+landCone.position.y=1.75; landGroup.add(landCone);
+const landRing = new THREE.Mesh(new THREE.RingGeometry(3,5.5,32), new THREE.MeshBasicMaterial({color:0xff9900,side:THREE.DoubleSide,transparent:true,opacity:0.5}));
+landRing.rotation.x=-Math.PI/2; landGroup.add(landRing);
+landGroup.visible=false;
+
+// ── STADIUM CACHE & HOME PLATE OFFSETS ───────────────────────────────────────
+// Geometry-derived default calibrations (X=left/right, Z=forward/back).
+// Computed by finding the home-plate-side Z extreme of field-level vertices,
+// corrected for node scale (0.010) × scene scale (3.28) = 0.0328 total.
+// Y is always 0 here — handled automatically by baseSinkY in prepAndCache.
+const DEFAULT_CALIBRATIONS = {
+  'Stadium_ARI.glb': { x:-19.5, y:0, z: -0.1 },
+  'Stadium_ATL.glb': { x: 26.6, y:0, z: 15.6 },
+  'Stadium_BAL.glb': { x:-28.4, y:0, z: 16.8 },
+  'Stadium_BOS.glb': { x:-148.6,y:0, z:  1.9 },
+  'Stadium_CHC.glb': { x:-18.5, y:0, z:  0.0 },
+  'Stadium_CIN.glb': { x:  4.3, y:0, z: -1.0 },
+  'Stadium_CLE.glb': { x: -4.6, y:0, z: -0.5 },
+  'Stadium_COL.glb': { x: -8.4, y:0, z:  2.9 },
+  'Stadium_CWS.glb': { x:-16.0, y:0, z: 43.8 },
+  'Stadium_DET.glb': { x: -0.3, y:0, z:  0.0 },
+  'Stadium_HOU.glb': { x:-51.9, y:0, z:  0.4 },
+  'Stadium_KC.glb':  { x:  2.5, y:0, z: -1.0 },
+  'Stadium_LAA.glb': { x:  5.0, y:0, z: -0.8 },
+  'Stadium_LAD.glb': { x:  0.3, y:0, z: -0.4 },
+  'Stadium_MIA.glb': { x:  6.2, y:0, z: 20.0 },
+  'Stadium_MIL.glb': { x: 15.2, y:0, z: -1.6 },
+  'Stadium_MIN.glb': { x: 51.1, y:0, z:  0.0 },
+  'Stadium_NYM.glb': { x:-18.4, y:0, z: -0.2 },
+  'Stadium_NYY.glb': { x: 30.5, y:0, z:  0.3 },
+  'Stadium_OAK.glb': { x: -1.0, y:0, z: 55.9 },
+  'Stadium_PHI.glb': { x:-247.3,y:0, z:  7.4 },
+  'Stadium_PIT.glb': { x: 33.8, y:0, z: -0.3 },
+  'Stadium_SD.glb':  { x: 17.0, y:0, z: -2.4 },
+  'Stadium_SEA.glb': { x:-76.2, y:0, z: 24.0 },
+  'Stadium_SF.glb':  { x: 10.7, y:0, z: 18.7 },
+  'Stadium_STL.glb': { x:  7.2, y:0, z:  0.0 },
+  'Stadium_TB.glb':  { x: 25.7, y:0, z: -6.8 },
+  'Stadium_TEX.glb': { x:  4.4, y:0, z: -1.6 },
+  'Stadium_TOR.glb': { x:  3.0, y:0, z: -0.7 },
+  'Stadium_WSH.glb': { x:-12.2, y:0, z: 39.4 },
+  'Stadium_MIN.glb': { x: 51.1, y:0, z:  0.0 },
+};
+
+const LS_KEY = 'mlbSim_homePlate_v2';
+
+function loadHomePlateOffsets() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch(e) { return {}; }
+}
+function getOffset(filename) {
+  const saved = loadHomePlateOffsets();
+  // User-saved values take priority; fall back to geometry-derived defaults
+  return saved[filename] || DEFAULT_CALIBRATIONS[filename] || { x:0, y:0, z:0 };
+}
+function saveHomePlateOffset(filename, x, y, z) {
+  const all = loadHomePlateOffsets();
+  all[filename] = { x, y, z };
+  try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch(e) {}
+}
+function clearHomePlateOffset(filename) {
+  const all = loadHomePlateOffsets();
+  delete all[filename];
+  try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch(e) {}
+}
+
+const cache = {};
+let activeGroup    = null;
+let activeFilename = null;
+const loader = new GLTFLoader();
+
+function prepAndCache(filename, gltf) {
+  const grp = gltf.scene;
+  grp.traverse(obj => {
+    if (!obj.isMesh) return;
+    obj.castShadow = true; obj.receiveShadow = true;
+    if (Array.isArray(obj.material)) {
+      obj.material = obj.material.map(m => m ? m.clone() : m);
+    } else if (obj.material) {
+      obj.material = obj.material.clone();
+    }
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(m => {
+      if (!m) return;
+      if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
+      m.side = THREE.DoubleSide; // raycasts (wall tracing + ball physics) must hit backfaces too
+    });
+  });
+  grp.scale.setScalar(MODEL_SCALE);
+  const box    = new THREE.Box3().setFromObject(grp);
+  // baseSinkY: estimate field surface as 8% above model bottom, consistent across models
+  const modelH  = box.max.y - box.min.y;
+  const baseSinkY = -(box.min.y + modelH * 0.08);
+  grp.position.set(0, baseSinkY, 0);
+  grp.visible = false;
+  scene.add(grp);
+  cache[filename] = { grp, baseSinkY };
+}
+
+// Clear any emissive tint from all meshes so GLB textures render at natural color.
+function clearStadiumEmissive(grp) {
+  grp.traverse(obj => {
+    if (!obj.isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(m => {
+      if (!m || !m.emissive) return;
+      m.emissive.set(0x000000);
+      m.emissiveIntensity = 0;
+    });
+  });
+}
+
+// ── TEAM COLORS ──────────────────────────────────────────────────────────────
+const TEAM_COLORS = {
+  'Stadium_ATL.glb': { primary:0xCE1141, secondary:0x13274F, name:'Braves'         },
+  'Stadium_ARI.glb': { primary:0xA71930, secondary:0xE3D4AD, name:'D-backs'        },
+  'Stadium_BAL.glb': { primary:0xDF4601, secondary:0x000000, name:'Orioles'        },
+  'Stadium_BOS.glb': { primary:0xBD3039, secondary:0x0C2340, name:'Red Sox'        },
+  'Stadium_CHC.glb': { primary:0x0E3386, secondary:0xCC3433, name:'Cubs'           },
+  'Stadium_CIN.glb': { primary:0xC6011F, secondary:0x000000, name:'Reds'           },
+  'Stadium_CLE.glb': { primary:0x00385D, secondary:0xE31937, name:'Guardians'      },
+  'Stadium_COL.glb': { primary:0x33006F, secondary:0xC4CED4, name:'Rockies'        },
+  'Stadium_CWS.glb': { primary:0x27251F, secondary:0xC4CED4, name:'White Sox'      },
+  'Stadium_DET.glb': { primary:0x0C2C56, secondary:0xFA4616, name:'Tigers'         },
+  'Stadium_HOU.glb': { primary:0x002D62, secondary:0xEB6E1F, name:'Astros'         },
+  'Stadium_KC.glb':  { primary:0x004687, secondary:0xC09A5B, name:'Royals'         },
+  'Stadium_LAA.glb': { primary:0xBA0021, secondary:0x003263, name:'Angels'         },
+  'Stadium_LAD.glb': { primary:0x005A9C, secondary:0xEF3E42, name:'Dodgers'        },
+  'Stadium_MIA.glb': { primary:0x00A3E0, secondary:0xFF6600, name:'Marlins'        },
+  'Stadium_MIL.glb': { primary:0x0A2351, secondary:0xB6922E, name:'Brewers'        },
+  'Stadium_MIN.glb': { primary:0x002B5C, secondary:0xD31145, name:'Twins'          },
+  'Stadium_NYM.glb': { primary:0x002D72, secondary:0xFF5910, name:'Mets'           },
+  'Stadium_NYY.glb': { primary:0x132448, secondary:0xC4CED4, name:'Yankees'        },
+  'Stadium_OAK.glb': { primary:0x003831, secondary:0xEFB21E, name:'Athletics'      },
+  'Stadium_PHI.glb': { primary:0xE81828, secondary:0x002D72, name:'Phillies'       },
+  'Stadium_PIT.glb': { primary:0x27251F, secondary:0xFDB827, name:'Pirates'        },
+  'Stadium_SD.glb':  { primary:0x2F241D, secondary:0xFFC425, name:'Padres'         },
+  'Stadium_SEA.glb': { primary:0x0C2C56, secondary:0x005C5C, name:'Mariners'       },
+  'Stadium_SF.glb':  { primary:0x27251F, secondary:0xFD5A1E, name:'Giants'         },
+  'Stadium_STL.glb': { primary:0xC41E3A, secondary:0x0C2340, name:'Cardinals'      },
+  'Stadium_TB.glb':  { primary:0x092C5C, secondary:0x8FBCE6, name:'Rays'           },
+  'Stadium_TEX.glb': { primary:0x003278, secondary:0xC0111F, name:'Rangers'        },
+  'Stadium_TOR.glb': { primary:0x134A8E, secondary:0xE8291C, name:'Blue Jays'      },
+  'Stadium_WSH.glb': { primary:0xAB0003, secondary:0x14225A, name:'Nationals'      },
+};
+
+// ── MLB THE SHOW-STYLE SKIES & CITYSCAPES ────────────────────────────────────
+// Dramatic per-stadium atmosphere presets (golden hour, dusk, twilight, …) plus
+// a procedural downtown skyline ring built around every park.
+const SKY_PRESETS = {
+  day:      { top:0x2f7fd6, mid:0xcfe8ff, gnd:0xa8c8e8, sun:[0xfff8e7,2.8], amb:[0xd0e8ff,0.80], cloud:0xffffff, earth:0x6f8f5a, bg:0xbcdcf5, water:0x3f7fb5, mtn:0x8298bd, name:'Afternoon' },
+  golden:   { top:0x2c5f9e, mid:0xffd9a3, gnd:0xc9986a, sun:[0xffd9a0,3.1], amb:[0xffe4c4,0.72], cloud:0xffe3c0, earth:0x7a8a52, bg:0xfad9a8, water:0xc89a5f, mtn:0x6f6a95, name:'Golden Hour' },
+  dusk:     { top:0x232a55, mid:0xff9e6e, gnd:0xa06a52, sun:[0xff9560,2.4], amb:[0xd9b8d8,0.62], cloud:0xffb88f, earth:0x5a6648, bg:0xe89a78, water:0x9a6a72, mtn:0x4f4a78, name:'Dusk' },
+  twilight: { top:0x1a1f44, mid:0xe87fa8, gnd:0x7a5878, sun:[0xff9bb0,1.9], amb:[0xb8a8e0,0.62], cloud:0xe8a8c8, earth:0x4d5a48, bg:0xc888a8, water:0x6a5a98, mtn:0x3d3a68, name:'Twilight' },
+  overcast: { top:0x7e95ab, mid:0xdbe5ee, gnd:0xa9b8c4, sun:[0xe8eef5,1.7], amb:[0xdde6ee,0.92], cloud:0xc8d2dc, earth:0x647a55, bg:0xcfdce8, water:0x7a8fa0, mtn:0x8a9aac, name:'Overcast' },
+  tropic:   { top:0x1c8fd9, mid:0xfff0bc, gnd:0x6fc4cf, sun:[0xfff2cc,3.0], amb:[0xd8f0ff,0.82], cloud:0xfff4dc, earth:0x5f9b58, bg:0xa8e4f5, water:0x2fa8c8, mtn:0x6a9a8a, name:'Tropical' },
+  desert:   { top:0x47558f, mid:0xffb285, gnd:0xcf9a64, sun:[0xffc287,2.7], amb:[0xffd9b8,0.68], cloud:0xffd4ad, earth:0x9a8a58, bg:0xf5c498, water:0x9a7a58, mtn:0x8a6a78, name:'Desert Dusk' },
+};
+let activeSky = SKY_PRESETS.day;
+
+// Per-stadium surroundings, modeled on the real neighborhoods.
+// All directions are spray angles: 0 = dead CF, +RF/−LF, ±180 = behind home.
+//   dt/hi/density — downtown cluster direction, tallest tower (ft), buildings
+//   water:{dir,span,r0,w} — river/bay band (no buildings on it; city resumes beyond)
+//   mtn:{dir,span,h}      — distant mountain ridge on the horizon
+//   hills:{dir,span,h}    — near green hills (replaces buildings in sector)
+//   open:{dir,span,r}     — parking lots / open land out to radius r (no buildings)
+//   lm:[{t,deg,dist}]     — landmarks: arch (Gateway), cn (CN Tower), wh (B&O Warehouse)
+const CITY_PROFILES = {
+  'Stadium_NYY.glb': { sky:'golden',   dt: -15, hi:300, density:850,   // Bronx mid-rise; Harlem River behind home-LF
+                       water:{dir:-135,span:55,r0:1500,w:700} },
+  'Stadium_NYM.glb': { sky:'day',      dt:-170, hi:380, density:700,   // Flushing — bay beyond LF, Manhattan far behind home
+                       water:{dir:-30,span:65,r0:1250,w:1300}, open:{dir:90,span:120,r:1000} },
+  'Stadium_BOS.glb': { sky:'golden',   dt:  20, hi:290, density:880 }, // Back Bay towers beyond CF/RF, dense brick low-rise
+  'Stadium_BAL.glb': { sky:'golden',   dt:  -5, hi:330, density:760,   // B&O Warehouse looms behind RF
+                       lm:[{t:'wh',deg:52,dist:480}] },
+  'Stadium_TB.glb':  { sky:'tropic',   dt: 170, hi:170, density:520,   // St. Pete low-rise, Tampa Bay far CF
+                       water:{dir:20,span:90,r0:1700,w:1400} },
+  'Stadium_TOR.glb': { sky:'twilight', dt:   0, hi:600, density:850,   // CN Tower beside the dome, Lake Ontario behind home
+                       lm:[{t:'cn',deg:-155,dist:650}], water:{dir:165,span:80,r0:1500,w:1600} },
+  'Stadium_CWS.glb': { sky:'day',      dt: -10, hi:400, density:720,   // Loop skyline far north, lots south
+                       open:{dir:180,span:130,r:950} },
+  'Stadium_CLE.glb': { sky:'day',      dt: -25, hi:380, density:760 }, // Downtown beyond LF/CF
+  'Stadium_DET.glb': { sky:'golden',   dt: -15, hi:390, density:760 }, // Downtown beyond LF/CF
+  'Stadium_KC.glb':  { sky:'golden',   dt:-160, hi:160, density:420,   // Sea of parking, downtown far behind home
+                       open:{dir:0,span:360,r:1500} },
+  'Stadium_MIN.glb': { sky:'day',      dt:  35, hi:400, density:820 }, // Downtown right beyond RF
+  'Stadium_MIL.glb': { sky:'overcast', dt: 150, hi:200, density:480,   // Parking + highways all around
+                       open:{dir:0,span:360,r:1200} },
+  'Stadium_HOU.glb': { sky:'golden',   dt:-155, hi:430, density:800 }, // Skyline immediately west, behind home/3B
+  'Stadium_LAA.glb': { sky:'golden',   dt: 165, hi:110, density:420,   // Suburban lots, San Gabriels beyond CF
+                       open:{dir:0,span:360,r:1300}, mtn:{dir:-10,span:110,h:550} },
+  'Stadium_OAK.glb': { sky:'dusk',     dt:-170, hi:140, density:420,   // Coliseum lots, Oakland hills beyond CF
+                       open:{dir:0,span:360,r:1300}, mtn:{dir:5,span:120,h:380} },
+  'Stadium_SEA.glb': { sky:'overcast', dt: -15, hi:430, density:800,   // Downtown north, Sound behind home, Rainier far SE
+                       water:{dir:-125,span:65,r0:1400,w:1600}, mtn:{dir:140,span:45,h:780} },
+  'Stadium_TEX.glb': { sky:'desert',   dt:-150, hi:200, density:500,   // Arlington entertainment district + lots
+                       open:{dir:0,span:360,r:1100} },
+  'Stadium_ATL.glb': { sky:'day',      dt: -15, hi:280, density:640 }, // Battery mid-rise, Buckhead far
+  'Stadium_MIA.glb': { sky:'tropic',   dt: -25, hi:330, density:680 }, // Little Havana low-rise, skyline far east
+  'Stadium_PHI.glb': { sky:'golden',   dt:-175, hi:410, density:640,   // Sports-complex lots, skyline far north
+                       open:{dir:0,span:360,r:1250} },
+  'Stadium_WSH.glb': { sky:'day',      dt:-160, hi:170, density:700,   // Height-capped DC, Anacostia beyond RF
+                       water:{dir:35,span:70,r0:1050,w:850} },
+  'Stadium_CHC.glb': { sky:'golden',   dt:  25, hi:330, density:920 }, // Wrigleyville rooftops, Loop far SE
+  'Stadium_CIN.glb': { sky:'dusk',     dt:-160, hi:290, density:680,   // Ohio River beyond RF, downtown behind home
+                       water:{dir:20,span:85,r0:850,w:950} },
+  'Stadium_PIT.glb': { sky:'dusk',     dt:   5, hi:390, density:740,   // Allegheny behind CF wall, Golden Triangle across it
+                       water:{dir:10,span:95,r0:680,w:650} },
+  'Stadium_STL.glb': { sky:'day',      dt: -10, hi:300, density:700,   // Gateway Arch over the LF skyline
+                       lm:[{t:'arch',deg:-8,dist:1550}] },
+  'Stadium_COL.glb': { sky:'day',      dt:-150, hi:340, density:720,   // LoDo behind home, Front Range beyond LF
+                       mtn:{dir:-55,span:120,h:850} },
+  'Stadium_ARI.glb': { sky:'desert',   dt:   0, hi:310, density:680,   // Downtown Phoenix + desert ranges
+                       mtn:{dir:25,span:130,h:450} },
+  'Stadium_LAD.glb': { sky:'twilight', dt: 175, hi:250, density:520,   // Elysian hills around the outfield, San Gabriels far
+                       hills:{dir:0,span:170,h:130}, mtn:{dir:-5,span:120,h:600} },
+  'Stadium_SD.glb':  { sky:'dusk',     dt:-165, hi:360, density:780,   // Gaslamp towers behind home, bay beyond RF
+                       water:{dir:60,span:60,r0:1500,w:1200} },
+  'Stadium_SF.glb':  { sky:'twilight', dt: -35, hi:390, density:800,   // McCovey Cove right behind RF, SoMa towers LF
+                       water:{dir:70,span:105,r0:560,w:1500} },
+};
+
+function applySkyPreset(name) {
+  const p = SKY_PRESETS[name] || SKY_PRESETS.day;
+  const u = skyDome.material.uniforms;
+  u.cTop.value.setHex(p.top);
+  u.cHorizon.value.setHex(p.mid);
+  u.cGround.value.setHex(p.gnd);
+  sun.color.setHex(p.sun[0]);     sun.intensity = p.sun[1];
+  ambient.color.setHex(p.amb[0]); ambient.intensity = p.amb[1];
+  cloudSprites.forEach(s => s.material.color.setHex(p.cloud));
+  cityGround.material.color.setHex(p.earth);
+  scene.background.setHex(p.bg);
+  activeSky = p;
+  return p;
+}
+
+// ── PROCEDURAL CITY ──────────────────────────────────────────────────────────
+const cityGroup = new THREE.Group();
+scene.add(cityGroup);
+let cityMesh = null;
+
+const cityGround = new THREE.Mesh(
+  new THREE.CircleGeometry(4200, 48),
+  new THREE.MeshLambertMaterial({ color: 0x6f8f5a })
+);
+cityGround.rotation.x = -Math.PI / 2;
+cityGround.position.y = -0.45;
+scene.add(cityGround);
+
+// Facade texture — window grid, instance color multiplies it per building
+function makeWindowTexture() {
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 128;
+  const cx = cv.getContext('2d');
+  cx.fillStyle = '#ffffff'; cx.fillRect(0, 0, 64, 128);
+  for (let y = 4; y < 124; y += 8) for (let x = 4; x < 60; x += 8) {
+    const lit = Math.random();
+    cx.fillStyle = lit > 0.84 ? 'rgba(255,238,170,0.92)'
+                 : lit > 0.50 ? 'rgba(45,60,80,0.55)'
+                 :              'rgba(28,38,54,0.78)';
+    cx.fillRect(x, y, 5, 5);
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const cityBoxGeo = new THREE.BoxGeometry(1, 1, 1); cityBoxGeo.translate(0, 0.5, 0);
+const cityMat    = new THREE.MeshLambertMaterial({ map: makeWindowTexture() });
+const CITY_PALETTE = [0x9aa6b2, 0x8a7464, 0xa8b8c8, 0x5d7286, 0xb5a890, 0x76553f, 0x47596b, 0xc4b8a4];
+const _glassTint = new THREE.Color(0x6e93b8);
+
+// Deterministic per-stadium randomness so each city looks the same every visit
+function seededRand(str) {
+  let s = 2166136261;
+  for (let i = 0; i < str.length; i++) { s ^= str.charCodeAt(i); s = Math.imul(s, 16777619); }
+  return () => ((s = Math.imul(s, 1664525) + 1013904223 | 0) >>> 0) / 4294967296;
+}
+
+const cityExtras = new THREE.Group(); // water, mountains, hills, landmarks
+cityGroup.add(cityExtras);
+
+function clearCity() {
+  if (cityMesh) { cityGroup.remove(cityMesh); cityMesh.dispose(); cityMesh = null; }
+  while (cityExtras.children.length) {
+    const c = cityExtras.children[0];
+    c.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+    cityExtras.remove(c);
+  }
+}
+
+// World polar angle (atan2 over x/z) of a spray-angle direction (CF = −Z)
+const sprayToPolar = deg => {
+  const r = deg * Math.PI / 180;
+  return Math.atan2(-Math.cos(r), Math.sin(r));
+};
+const angDiff = (a, b) => {
+  let d = a - b;
+  while (d >  Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return Math.abs(d);
+};
+const inSector = (polar, f) => angDiff(polar, sprayToPolar(f.dir)) <= (f.span * Math.PI / 180) / 2;
+
+// Flat water band (river / bay / cove) as a ring sector at y just below grade.
+// Ring verts (cosθ, sinθ) land at world polar −θ after the −90° X rotation.
+function buildWater(f, cs) {
+  const span = f.span * Math.PI / 180;
+  const polarC = sprayToPolar(f.dir);
+  const geo = new THREE.RingGeometry(f.r0 * cs, (f.r0 + f.w) * cs, 48, 1, -(polarC + span / 2), span);
+  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: activeSky.water }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = -0.30;
+  cityExtras.add(m);
+}
+
+// Jagged (or rolling) ridge standing along an arc — mountains and hills
+function buildRidge(f, R, cs, color, smooth, rand) {
+  const segs = 30;
+  const span = f.span * Math.PI / 180;
+  const polarC = sprayToPolar(f.dir);
+  const verts = [], idx = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const a = polarC - span / 2 + span * t;
+    const edge = Math.sin(Math.PI * t);                       // taper at the ends
+    const jag  = smooth
+      ? 0.55 + 0.45 * Math.sin(t * Math.PI * 5 + rand() * 6)
+      : 0.35 + 0.65 * rand();
+    const h = f.h * cs * jag * Math.pow(edge, 0.5);
+    const x = Math.cos(a) * R, z = Math.sin(a) * R;
+    verts.push(x, -2, z,  x, Math.max(h, 1), z);
+    if (i < segs) {
+      const b = i * 2;
+      idx.push(b, b + 1, b + 2,  b + 1, b + 3, b + 2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  geo.setIndex(idx);
+  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
+  cityExtras.add(new THREE.Mesh(geo, mat));
+}
+
+// Landmark geometry: Gateway Arch, CN Tower, B&O Warehouse
+function buildLandmark(spec, cs) {
+  const g = new THREE.Group();
+  if (spec.t === 'arch') {
+    const m = new THREE.Mesh(
+      new THREE.TorusGeometry(300 * cs, 15 * cs, 8, 48, Math.PI),
+      new THREE.MeshLambertMaterial({ color: 0xc8ccd2 })
+    );
+    g.add(m);
+  } else if (spec.t === 'cn') {
+    const conc = new THREE.MeshLambertMaterial({ color: 0xb4b9bf });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(13 * cs, 26 * cs, 900 * cs, 10), conc);
+    shaft.position.y = 450 * cs;
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(46 * cs, 40 * cs, 58 * cs, 12), conc);
+    pod.position.y = 690 * cs;
+    const spike = new THREE.Mesh(new THREE.CylinderGeometry(1.5 * cs, 5 * cs, 200 * cs, 6), conc);
+    spike.position.y = 1000 * cs;
+    g.add(shaft, pod, spike);
+  } else if (spec.t === 'wh') {
+    const wh = new THREE.Mesh(
+      new THREE.BoxGeometry(980 * cs, 88 * cs, 54 * cs),
+      new THREE.MeshLambertMaterial({ color: 0x7a4434 })
+    );
+    wh.position.y = 44 * cs;
+    g.add(wh);
+  }
+  const [x, z] = wallXZ(spec.dist * cs, spec.deg);
+  g.position.set(x, 0, z);
+  g.lookAt(0, 0, 0); // face the park (box length runs tangentially)
+  cityExtras.add(g);
+}
+
+function buildCity(filename) {
+  clearCity();
+  const prof = CITY_PROFILES[filename] || { dt: 0, hi: 300, density: 700 };
+  const rand = seededRand(filename);
+  const cs = Math.max(0.55, fieldScale); // surroundings shrink a bit with the field
+
+  // City starts just past the stadium's footprint
+  let inner = 700 * fieldScale + 250;
+  const entry = cache[filename];
+  if (entry) {
+    const b = new THREE.Box3().setFromObject(entry.grp);
+    inner = Math.max(b.max.x, -b.min.x, b.max.z, -b.min.z) * 1.06 + 110;
+  }
+  const outer = inner + 2400;
+
+  const n = prof.density || 700;
+  const mesh = new THREE.InstancedMesh(cityBoxGeo, cityMat, n);
+  const mtx = new THREE.Matrix4(), q = new THREE.Quaternion();
+  const pos = new THREE.Vector3(), scl = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const col = new THREE.Color();
+  const streetAng = rand() * Math.PI / 2;
+  const dtRad = (prof.dt || 0) * Math.PI / 180;
+  const dx = Math.sin(dtRad), dz = -Math.cos(dtRad); // downtown unit dir (CF = −Z)
+
+  let placed = 0;
+  for (let i = 0; i < n; i++) {
+    const a = rand() * Math.PI * 2;
+    const r = inner + Math.pow(rand(), 0.85) * (outer - inner);
+
+    // Respect the real surroundings: no buildings on water, open lots, or hills
+    if (prof.water && inSector(a, prof.water) &&
+        r > prof.water.r0 * cs && r < (prof.water.r0 + prof.water.w) * cs) continue;
+    if (prof.open  && inSector(a, prof.open)  && r < prof.open.r * cs) continue;
+    if (prof.hills && inSector(a, prof.hills) && r < outer * 0.75) continue;
+
+    const px = Math.cos(a) * r, pz = Math.sin(a) * r;
+    const prox = Math.max(0, (px * dx + pz * dz) / r);    // 1 = toward downtown
+    const dtBoost = prox * prox * prox;
+    const distFade = 1 - (r - inner) / (outer - inner) * 0.35;
+
+    let h = 18 + rand() * 44;                              // low-rise base
+    if (rand() < 0.16 + 0.55 * dtBoost)
+      h += rand() * rand() * prof.hi * (0.3 + 0.7 * dtBoost);
+    h *= distFade;
+    const w = 26 + rand() * 48, d = 26 + rand() * 48;
+
+    q.setFromAxisAngle(up, streetAng + (rand() < 0.5 ? 0 : Math.PI / 2) + (rand() - 0.5) * 0.06);
+    pos.set(px, -0.4, pz);
+    scl.set(w, h, d);
+    mtx.compose(pos, q, scl);
+    mesh.setMatrixAt(placed, mtx);
+
+    col.setHex(CITY_PALETTE[(rand() * CITY_PALETTE.length) | 0]);
+    if (h > 150) col.lerp(_glassTint, 0.45);               // towers read as glass
+    col.offsetHSL(0, 0, (rand() - 0.5) * 0.08);
+    mesh.setColorAt(placed, col);
+    placed++;
+  }
+  mesh.count = placed;
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  cityGroup.add(mesh);
+  cityMesh = mesh;
+
+  // Surroundings features
+  if (prof.water) buildWater(prof.water, cs);
+  if (prof.mtn)   buildRidge(prof.mtn, 3650, cs, activeSky.mtn, false, rand);
+  if (prof.hills) buildRidge(prof.hills, Math.max(inner + 250, 1050 * cs), cs, 0x47663e, true, rand);
+  (prof.lm || []).forEach(spec => buildLandmark(spec, cs));
+}
+
+// Team-themed lights (mutated on each switch)
+const teamLight1 = new THREE.PointLight(0xffffff, 0, 800);
+teamLight1.position.set(0, 200, -150);
+scene.add(teamLight1);
+
+const teamLight2 = new THREE.PointLight(0xffffff, 0, 800);
+teamLight2.position.set(0, 150, 100);
+scene.add(teamLight2);
+
+function applyTeamTheme(filename) {
+  const t = TEAM_COLORS[filename] || { primary: 0x0ea5e9, secondary: 0x6366f1, name: '' };
+  const priHex = '#' + new THREE.Color(t.primary).getHexString();
+  const secHex = '#' + new THREE.Color(t.secondary).getHexString();
+
+  // Soft team-tinted point lights for The Show-style color wash
+  teamLight1.color.set(t.primary);   teamLight1.intensity = 0.35;
+  teamLight2.color.set(t.secondary); teamLight2.intensity = 0.25;
+
+  // Per-city sky / lighting preset (background set by the preset)
+  const prof = CITY_PROFILES[filename];
+  const sky  = applySkyPreset(prof ? prof.sky : 'day');
+
+  // Field overlays — neutral ball/chalk palette
+  originRingMesh.material.color.set(0xffffff);
+  trailLine.material.color.set(0xff8c00);
+  ballGlow.material.color.set(0xffffff);
+  if (wallArcLine) wallArcLine.material.color.set(0xffffff);
+  foulLines.forEach(l => l.material.color.set(0xffffff));
+
+  // Remove any emissive tints so GLB textures render at natural color
+  const entry = cache[filename];
+  if (entry) clearStadiumEmissive(entry.grp);
+
+  // UI — team colors flow through CSS vars (header banner, buttons, sliders,
+  // play banner, active states)
+  const root = document.documentElement.style;
+  root.setProperty('--pri', priHex);
+  root.setProperty('--sec', secHex);
+  const dims = STADIUM_DIMS[filename];
+  document.getElementById('hdrTeam').textContent = dims ? dims.name : 'Ball Flight Simulator';
+  document.getElementById('hdrSub').textContent  =
+    (t.name ? t.name + ' · ' : '') + sky.name + ' · Home plate = origin';
+  document.getElementById('loadBadge').style.color = secHex;
+  document.querySelector('.border-r').style.borderColor = priHex + '55';
+}
+
+function applyModelPosition(filename, offX, offY, offZ, sc) {
+  const entry = cache[filename];
+  if (!entry) return;
+  // fieldScale shrinks the stadium around home plate: with the plate calibrated
+  // to the world origin, scaling the group position by k keeps it there.
+  const k = fieldScale;
+  entry.grp.scale.setScalar((sc || MODEL_SCALE) * k);
+  entry.grp.position.set(offX * k, (entry.baseSinkY + offY) * k, offZ * k);
+}
+
+function switchStadium(filename) {
+  if (activeGroup) activeGroup.visible = false;
+  const entry = cache[filename];
+  if (!entry) { document.getElementById('calInfo').textContent = filename + ' not loaded yet.'; return; }
+
+  entry.grp.visible = true;
+  activeGroup    = entry.grp;
+  activeFilename = filename;
+
+  applyTeamTheme(filename);
+
+  // Load per-stadium offset (user-saved → geometry default → 0,0,0)
+  const saved = getOffset(filename);
+  document.getElementById('offX').value = saved.x;
+  document.getElementById('offY').value = saved.y;
+  document.getElementById('offZ').value = saved.z;
+  document.getElementById('modelScale').value = MODEL_SCALE;
+
+  // Apply the saved position immediately, then rebuild collision mesh list
+  applyModelPosition(filename, saved.x, saved.y, saved.z, MODEL_SCALE);
+  buildCollisionMeshes(); // must run after positioning so bounding boxes are world-correct
+  autoLevelField(filename);   // shift field surface to y=0 if the model floats/sinks
+  buildWallOverlay(filename); // after collision meshes — traces the fence from the model
+  buildCrowd(filename);       // fans on the (now leveled) seating surfaces
+  buildCity(filename);        // skyline ring sized from the leveled model footprint
+
+  const t = TEAM_COLORS[filename];
+  const saved_str = (saved.x || saved.y || saved.z)
+    ? '  |  HP offset: (' + saved.x + ', ' + saved.y + ', ' + saved.z + ')'
+    : '  |  No home plate saved yet';
+  document.getElementById('calInfo').textContent = (t ? t.name : filename) + saved_str;
+
+  const box = new THREE.Box3().setFromObject(entry.grp);
+  const sz  = box.getSize(new THREE.Vector3());
+  const dia = Math.max(sz.x, sz.z);
+  camera.position.set(dia*0.08, dia*0.2, dia*0.35);
+  controls.target.set(0, sz.y*0.08, -dia*0.15);
+  controls.update();
+}
+
+function applyCalibration() {
+  if (!activeGroup || !activeFilename) return;
+  const offX = parseFloat(document.getElementById('offX').value) || 0;
+  const offY = parseFloat(document.getElementById('offY').value) || 0;
+  const offZ = parseFloat(document.getElementById('offZ').value) || 0;
+  const sc   = parseFloat(document.getElementById('modelScale').value) || MODEL_SCALE;
+  applyModelPosition(activeFilename, offX, offY, offZ, sc);
+  buildCollisionMeshes();
+  autoLevelField(activeFilename);
+  buildWallOverlay(activeFilename); // re-trace fence at the new position
+  buildCrowd(activeFilename);
+  buildCity(activeFilename);
+}
+
+function saveHomePlate() {
+  if (!activeFilename) return;
+  const offX = parseFloat(document.getElementById('offX').value) || 0;
+  const offY = parseFloat(document.getElementById('offY').value) || 0;
+  const offZ = parseFloat(document.getElementById('offZ').value) || 0;
+  saveHomePlateOffset(activeFilename, offX, offY, offZ);
+  const t = TEAM_COLORS[activeFilename];
+  document.getElementById('calInfo').textContent =
+    '✓ Saved home plate for ' + (t ? t.name : activeFilename) +
+    ' at (' + offX + ', ' + offY + ', ' + offZ + ')';
+}
+
+function resetCalibration() {
+  if (!activeFilename) return;
+  clearHomePlateOffset(activeFilename);
+  document.getElementById('offX').value = 0;
+  document.getElementById('offY').value = 0;
+  document.getElementById('offZ').value = 0;
+  applyModelPosition(activeFilename, 0, 0, 0, MODEL_SCALE);
+  buildCollisionMeshes();
+  autoLevelField(activeFilename);
+  buildWallOverlay(activeFilename);
+  buildCrowd(activeFilename);
+  buildCity(activeFilename);
+  document.getElementById('calInfo').textContent = 'Reset to default for ' + activeFilename;
+}
+
+// ── FIELD SCALE (age level) ──────────────────────────────────────────────────
+function applyFieldScale(key) {
+  const def = FIELD_SCALES[key] || FIELD_SCALES.pro;
+  fieldScaleKey = key;
+  fieldScale = def.k;
+  try { localStorage.setItem(FIELD_SCALE_KEY, key); } catch(e) {}
+
+  // Diamond overlay scales with the stadium model, so the drawn chalk lines,
+  // base pads, mound and rubber sit exactly on the model's painted infield.
+  diamondGroup.scale.setScalar(def.k);
+
+  const chip = document.getElementById('fsChip');
+  if (chip) chip.textContent = def.label;
+  const info = document.getElementById('fsInfo');
+  if (info) info.textContent = Math.round(90 * def.k) + ' ft bases · mound ' +
+    Math.round(60.5 * def.k) + ' ft · fences ~' + Math.round(def.k * 100) + '% of MLB';
+
+  // Reposition + re-trace the active stadium at the new scale (cached per scale)
+  if (activeFilename) applyCalibration();
+  else renderChart();
+}
+
+// ── PRELOADER ────────────────────────────────────────────────────────────────
+let doneCount = 0;
+
+function preloadAll() {
+  const total = ALL_STADIUMS.length;
+  document.getElementById('loadStatus').textContent = '0 / '+total+' stadiums loaded';
+
+  ALL_STADIUMS.forEach(function(filename) {
+    loader.load(
+      filename,
+      function(gltf) {
+        try { prepAndCache(filename, gltf); } catch(e) { console.error('prepAndCache error for '+filename, e); }
+        doneCount++;
+        const pct = Math.round(doneCount/total*100);
+        document.getElementById('progBar').style.width = pct+'%';
+        document.getElementById('loadStatus').textContent = doneCount+' / '+total+' stadiums loaded';
+        document.getElementById('loadBadge').textContent = doneCount+'/'+total;
+        if (doneCount === total) {
+          document.getElementById('overlay').style.display = 'none';
+          switchStadium(document.getElementById('stadiumSelect').value);
+          externalApiReady(); // accept hits from OVLM / URL params now
+        }
+      },
+      function(xhr) {
+        if (xhr.total > 0) {
+          const name = filename.replace('Stadium_','').replace('.glb','');
+          const pct  = Math.round(xhr.loaded/xhr.total*100);
+          document.getElementById('loadStatus').textContent = 'Loading '+name+' '+pct+'%  ('+doneCount+'/'+total+' done)';
+        }
+      },
+      function(err) {
+        console.warn('Failed: '+filename, err);
+        doneCount++;
+        document.getElementById('progBar').style.width = Math.round(doneCount/total*100)+'%';
+        document.getElementById('loadBadge').textContent = doneCount+'/'+total;
+        if (doneCount === total) {
+          document.getElementById('overlay').style.display = 'none';
+          switchStadium(document.getElementById('stadiumSelect').value);
+          externalApiReady(); // accept hits from OVLM / URL params now
+        }
+      }
+    );
+  });
+}
+
+// ── DPASSE EVENT CODE SYSTEM (ported from github.com/dpasse/baseball_simulator) ─
+const EC = Object.freeze({
+  HR:'HR', Triple:'Triple', LongDouble:'LongDouble', ShortDouble:'ShortDouble',
+  LongSingle:'LongSingle', MediumSingle:'MediumSingle', ShortSingle:'ShortSingle',
+  LongFly:'LongFly', MediumFly:'MediumFly', ShortFly:'ShortFly',
+  InfieldFly:'InfieldFly', Grounder:'Grounder', GIDP:'GIDP', Error:'Error'
+});
+
+// EventCode → { label, cls, isHit, isOut }
+const EC_META = {
+  [EC.HR]:         { label:'HOME RUN',        cls:'outcome-hr',  isHit:true,  isOut:false },
+  [EC.Triple]:     { label:'TRIPLE',           cls:'outcome-3b',  isHit:true,  isOut:false },
+  [EC.LongDouble]: { label:'DOUBLE (LONG)',    cls:'outcome-2b',  isHit:true,  isOut:false },
+  [EC.ShortDouble]:{ label:'DOUBLE',           cls:'outcome-2b',  isHit:true,  isOut:false },
+  [EC.LongSingle]: { label:'SINGLE (LONG)',    cls:'outcome-1b',  isHit:true,  isOut:false },
+  [EC.MediumSingle]:{ label:'SINGLE',          cls:'outcome-1b',  isHit:true,  isOut:false },
+  [EC.ShortSingle]:{ label:'SINGLE (SHORT)',   cls:'outcome-1b',  isHit:true,  isOut:false },
+  [EC.LongFly]:    { label:'FLY BALL — OUT',   cls:'outcome-out', isHit:false, isOut:true  },
+  [EC.MediumFly]:  { label:'FLY BALL — OUT',   cls:'outcome-out', isHit:false, isOut:true  },
+  [EC.ShortFly]:   { label:'POP FLY — OUT',    cls:'outcome-out', isHit:false, isOut:true  },
+  [EC.InfieldFly]: { label:'INFIELD FLY — OUT',cls:'outcome-out', isHit:false, isOut:true  },
+  [EC.Grounder]:   { label:'GROUND BALL — OUT',cls:'outcome-out', isHit:false, isOut:true  },
+  [EC.GIDP]:       { label:'GROUND DP — OUT',  cls:'outcome-out', isHit:false, isOut:true  },
+  [EC.Error]:      { label:'ERROR',            cls:'outcome-1b',  isHit:false, isOut:false },
+};
+
+// ── PREDICTIVE OUTCOME MODEL ─────────────────────────────────────────────────
+// Statcast-derived expected-outcome surfaces over exit velocity × launch angle.
+// Grids encode xBA (P(hit)) and per-type probabilities approximated from public
+// MLB expected-stats data (sweet spot 8–32°, barrels EV≥98 @ 26–30°, etc.).
+// Bilinear interpolation between anchors; outcomes are then SAMPLED from the
+// distribution, so session AVG converges to the xBA the inputs deserve.
+const X_EV = [60, 70, 80, 90, 95, 100, 105, 110, 120];
+const X_LA = [-30, -10, 0, 10, 18, 25, 32, 40, 50, 70];
+
+// P(hit) = xBA
+const XBA = [
+  [.05,.08,.12,.15,.17,.19,.21,.23,.25],  // -30° chopper
+  [.10,.14,.18,.23,.27,.31,.35,.39,.43],  // -10° ground ball
+  [.15,.22,.30,.38,.44,.50,.55,.60,.65],  //   0° low liner
+  [.20,.35,.52,.64,.68,.72,.76,.80,.84],  //  10° line drive
+  [.15,.30,.50,.62,.67,.73,.79,.85,.90],  //  18° sweet spot
+  [.10,.18,.30,.42,.55,.68,.80,.88,.94],  //  25° LD/FB
+  [.06,.10,.15,.25,.38,.55,.72,.85,.92],  //  32° fly ball
+  [.04,.06,.09,.14,.22,.35,.52,.68,.80],  //  40° deep fly
+  [.02,.03,.04,.06,.10,.16,.26,.38,.50],  //  50° high fly
+  [.01,.01,.02,.02,.03,.04,.06,.08,.10],  //  70° pop-up
+];
+// P(home run)
+const XHR = [
+  [0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,.01,.03,.08,.15,.25],
+  [0,0,0,.02,.06,.15,.30,.50,.70],
+  [0,0,.01,.06,.18,.40,.62,.80,.92],
+  [0,0,.01,.05,.16,.38,.60,.78,.90],
+  [0,0,0,.03,.09,.20,.38,.55,.70],
+  [0,0,0,.01,.03,.08,.16,.28,.40],
+  [0,0,0,0,0,0,0,0,0],
+];
+// P(double)
+const X2B = [
+  [.01,.01,.02,.03,.04,.04,.05,.05,.06],
+  [.01,.02,.03,.04,.05,.06,.07,.08,.09],
+  [.02,.03,.05,.07,.09,.11,.13,.15,.17],
+  [.03,.06,.10,.14,.16,.18,.20,.22,.24],
+  [.03,.07,.12,.17,.20,.22,.24,.25,.25],
+  [.02,.05,.10,.15,.18,.18,.14,.08,.02],
+  [.01,.03,.06,.10,.13,.12,.09,.05,.02],
+  [.01,.02,.03,.05,.07,.08,.08,.07,.05],
+  [0,.01,.01,.02,.03,.04,.05,.05,.05],
+  [0,0,0,0,0,0,0,0,0],
+];
+// P(triple)
+const X3B = [
+  [0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0],
+  [0,0,0,.005,.005,.01,.01,.01,.01],
+  [0,.005,.01,.015,.02,.02,.02,.02,.02],
+  [0,.005,.01,.015,.02,.02,.02,.02,.02],
+  [0,.005,.01,.015,.02,.02,.015,.01,.005],
+  [0,0,.005,.01,.01,.01,.01,.005,0],
+  [0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0],
+];
+
+function gridLookup(grid, ev, la) {
+  const e = Math.min(Math.max(ev, X_EV[0]), X_EV[X_EV.length-1]);
+  const l = Math.min(Math.max(la, X_LA[0]), X_LA[X_LA.length-1]);
+  let i = 0; while (i < X_LA.length - 2 && X_LA[i+1] < l) i++;
+  let j = 0; while (j < X_EV.length - 2 && X_EV[j+1] < e) j++;
+  const tl = (l - X_LA[i]) / (X_LA[i+1] - X_LA[i]);
+  const te = (e - X_EV[j]) / (X_EV[j+1] - X_EV[j]);
+  const a = grid[i][j]   * (1-te) + grid[i][j+1]   * te;
+  const b = grid[i+1][j] * (1-te) + grid[i+1][j+1] * te;
+  return a * (1-tl) + b * tl;
+}
+
+// Expected stats for a batted ball: xBA + outcome probability distribution
+function xStats(ev, la, sa) {
+  const xba = gridLookup(XBA, ev, la);
+  const phr = gridLookup(XHR, ev, la);
+  let p2 = gridLookup(X2B, ev, la);
+  let p3 = gridLookup(X3B, ev, la);
+  if (Math.abs(sa || 0) > 25) { p2 *= 1.25; p3 *= 1.5; } // gaps/lines → extra bases
+  p2 = Math.min(p2, Math.max(0, xba - phr));
+  p3 = Math.min(p3, Math.max(0, xba - phr - p2));
+  const p1 = Math.max(0, xba - phr - p2 - p3);
+  return { xba, phr, p3, p2, p1 };
+}
+
+// Base state machine (ported from dpasse bases/states/)
+// bases = [1B, 2B, 3B] (1=occupied). Returns { newBases, runs }
+function applyBaseEvent(code, bases) {
+  let raw;
+  const [b1, b2, b3] = bases;
+  switch (code) {
+    case EC.HR:          raw = [0,0,0,b1,b2,b3,1]; break; // everyone scores + batter
+    case EC.Triple:      raw = [0,0,1,b1,b2,b3];   break; // batter at 3B, all advance/score
+    case EC.LongDouble:  raw = [0,1,0,b1,b2,b3];   break; // batter at 2B, all score
+    case EC.ShortDouble: raw = [0,1,b1,b2,b3];      break; // batter at 2B, 3B/2B score
+    case EC.LongSingle:  raw = [1,0,b1,b2,b3];      break; // batter at 1B, 2B+3B score
+    case EC.MediumSingle:raw = [1,b1,0,b2,b3];      break; // batter at 1B, 3B scores, 2B→3B
+    case EC.ShortSingle:
+    case EC.Error:       raw = [1,b1,b2,b3];         break; // batter at 1B, 3B scores
+    case EC.MediumFly:   raw = [b1,b2,0,b3];         break; // 3B scores (sac fly)
+    case EC.LongFly:     raw = [b1,0,b2,b3];         break; // 3B scores, 2B advances
+    case EC.GIDP:
+      if (b1 && b2)      raw = [0,1,b3,1];            break;
+      if (b1)            raw = [0,b2,b3,1];            break;
+      // else fall through
+    case EC.Grounder:
+      if (!b1 || bases.toString()==='0,1,1') raw=[b1,b2,b3]; break;
+      raw = [b1,0,b2,b3];                              break;
+    default:             raw = [b1,b2,b3];             break;
+  }
+  if (!raw) raw = [b1,b2,b3];
+  const newBases = [raw[0]||0, raw[1]||0, raw[2]||0];
+  const runs = raw.slice(3).reduce((s,v) => s+(v||0), 0);
+  return { newBases, runs };
+}
+
+// Game state
+const gameState = { outs:0, bases:[0,0,0], homeScore:0, awayScore:0, inning:1, topBottom:'top' };
+
+function updateGameStateUI() {
+  const { outs, bases, homeScore, awayScore, inning, topBottom } = gameState;
+  const arrow = topBottom==='top' ? '▲' : '▼';
+  document.getElementById('gsInning').textContent = arrow+' '+inning;
+  for (let i=0;i<3;i++) {
+    const el = document.getElementById('gsOut'+i);
+    el.className = 'w-2.5 h-2.5 rounded-full ' + (i < outs ? 'gs-out-on' : 'gs-out-off');
+  }
+  ['gs1B','gs2B','gs3B'].forEach((id,i) => {
+    const el = document.getElementById(id);
+    if (el) el.className.baseVal = bases[i] ? 'gs-base-on' : 'gs-base-off';
+  });
+  document.getElementById('gsAway').textContent = awayScore;
+  document.getElementById('gsHome').textContent = homeScore;
+  if (typeof renderGameLog === 'function') renderGameLog(); // keep canvas overlay in sync
+}
+
+function advanceGameState(code) {
+  const meta = EC_META[code];
+  if (!meta) return;
+  if (meta.isOut || code===EC.GIDP) {
+    const extraOut = (code===EC.GIDP) ? 2 : 1;
+    gameState.outs = Math.min(3, gameState.outs + extraOut);
+  }
+  if (meta.isHit || meta.isOut) {
+    const { newBases, runs } = applyBaseEvent(code, gameState.bases);
+    gameState.bases = newBases;
+    if (runs > 0) {
+      if (gameState.topBottom==='top') gameState.awayScore += runs;
+      else                             gameState.homeScore += runs;
+      const runsEl = document.getElementById('gsRuns');
+      if (runsEl) { runsEl.textContent = '+'+runs+' run'+(runs>1?'s':'')+'!'; setTimeout(()=>{runsEl.textContent='';},3000); }
+    }
+  }
+  if (gameState.outs >= 3) {
+    setTimeout(() => {
+      gameState.outs=0; gameState.bases=[0,0,0];
+      if (gameState.topBottom==='top') gameState.topBottom='bottom';
+      else { gameState.topBottom='top'; gameState.inning++; }
+      updateGameStateUI();
+    }, 2000);
+  }
+  updateGameStateUI();
+}
+
+window.resetGameState = function() {
+  Object.assign(gameState, {outs:0,bases:[0,0,0],homeScore:0,awayScore:0,inning:1,topBottom:'top'});
+  Object.assign(sessionStats, { ab:0, h:0, hr:0, tb:0, sumEv:0, maxEv:0, sumDist:0, maxDist:0, hardHit:0, sumXba:0 });
+  hitLog.length = 0;
+  sessionHits.length = 0;
+  updateGameStateUI();
+  renderGameLog();
+  document.getElementById('mEventCode').textContent='—';
+  document.getElementById('mContact').textContent='--';
+  document.getElementById('mDepth').textContent='--';
+  if (typeof drawZoneCanvas === 'function') drawZoneCanvas();
+};
+
+// ── HIT LOG & SESSION STATS (HitTrax-style canvas overlay) ───────────────────
+const sessionStats = { ab:0, h:0, hr:0, tb:0, sumEv:0, maxEv:0, sumDist:0, maxDist:0, hardHit:0, sumXba:0 };
+const hitLog = [];
+const TB_BY_CODE = {
+  [EC.HR]:4, [EC.Triple]:3, [EC.LongDouble]:2, [EC.ShortDouble]:2,
+  [EC.LongSingle]:1, [EC.MediumSingle]:1, [EC.ShortSingle]:1,
+};
+const SHORT_RES = {
+  [EC.HR]:'HR', [EC.Triple]:'3B', [EC.LongDouble]:'2B', [EC.ShortDouble]:'2B',
+  [EC.LongSingle]:'1B', [EC.MediumSingle]:'1B', [EC.ShortSingle]:'1B',
+  [EC.LongFly]:'FO', [EC.MediumFly]:'FO', [EC.ShortFly]:'FO',
+  [EC.InfieldFly]:'PU', [EC.Grounder]:'GO', [EC.GIDP]:'DP', [EC.Error]:'E',
+};
+const fmtAvg = v => v.toFixed(3).replace(/^0\./, '.');
+
+// ── PLAY OUTCOME BANNER ──────────────────────────────────────────────────────
+// Animated blue banner over the field after each play resolves — full words.
+const BANNER_TEXT = {
+  [EC.HR]:'HOME RUN', [EC.Triple]:'TRIPLE',
+  [EC.LongDouble]:'DOUBLE', [EC.ShortDouble]:'DOUBLE',
+  [EC.LongSingle]:'SINGLE', [EC.MediumSingle]:'SINGLE', [EC.ShortSingle]:'SINGLE',
+  [EC.LongFly]:'FLY BALL OUT', [EC.MediumFly]:'FLY BALL OUT', [EC.ShortFly]:'POP FLY OUT',
+  [EC.InfieldFly]:'INFIELD FLY OUT', [EC.Grounder]:'GROUND BALL OUT',
+  [EC.GIDP]:'DOUBLE PLAY', [EC.Error]:'REACHED ON ERROR',
+};
+
+function showPlayBanner(code, dist) {
+  const b = document.getElementById('playBanner');
+  document.getElementById('pbText').textContent = BANNER_TEXT[code] || '';
+  document.getElementById('pbSub').textContent  = Math.round(dist) + ' FEET';
+  b.classList.remove('show');
+  void b.offsetWidth; // restart the CSS animation
+  b.classList.add('show');
+}
+document.getElementById('playBanner').addEventListener('animationend', e => {
+  e.currentTarget.classList.remove('show');
+});
+
+function logHit(dist, ev, outcome) {
+  const la = parseFloat(document.getElementById('launchAngle').value);
+  const meta = EC_META[outcome.code] || {};
+  sessionStats.ab++;
+  if (meta.isHit) sessionStats.h++;
+  if (outcome.code === EC.HR) sessionStats.hr++;
+  sessionStats.tb      += TB_BY_CODE[outcome.code] || 0;
+  sessionStats.sumEv   += ev;
+  sessionStats.maxEv    = Math.max(sessionStats.maxEv, ev);
+  sessionStats.sumDist += dist;
+  sessionStats.maxDist  = Math.max(sessionStats.maxDist, dist);
+  if (ev >= 95) sessionStats.hardHit++;
+  sessionStats.sumXba  += outcome.xba || 0;
+  hitLog.unshift({
+    n: sessionStats.ab, res: SHORT_RES[outcome.code] || '—',
+    ev: Math.round(ev), la: Math.round(la), dist: Math.round(dist),
+    type: outcome.type || '—', xba: fmtAvg(outcome.xba || 0), isHit: !!meta.isHit,
+  });
+  if (hitLog.length > 10) hitLog.pop();
+  // Full-session record for the charts (uncapped)
+  const zn = zoneNumber(contact.side, contact.ht);
+  sessionHits.push({
+    n: sessionStats.ab, ev, la, dist,
+    x: lastLand.x, z: lastLand.z,
+    res: SHORT_RES[outcome.code] || '—', isHit: !!meta.isHit,
+    cx: contact.side, cy: contact.ht, depth: contact.depth, zone: zn,
+    sess: session.type, player: activePlayer().name, side: battingSide(),
+    lvl: fieldScaleKey,
+  });
+  document.getElementById('mContact').textContent =
+    (zn ? 'ZONE ' + zn : 'OUT OF ZONE') + ' · ' + contact.ht.toFixed(2) + ' FT';
+  document.getElementById('mDepth').textContent =
+    (contact.depth >= 0 ? '+' : '') + contact.depth.toFixed(1) + '"';
+  drawZoneCanvas();
+  renderGameLog();
+}
+
+function renderGameLog() {
+  const s = sessionStats;
+  document.getElementById('glBA').textContent   = s.ab ? fmtAvg(s.h / s.ab)      : '.000';
+  document.getElementById('glSLG').textContent  = s.ab ? fmtAvg(s.tb / s.ab)     : '.000';
+  document.getElementById('glXBA').textContent  = s.ab ? fmtAvg(s.sumXba / s.ab) : '.000';
+  document.getElementById('glHR').textContent   = s.hr;
+  document.getElementById('glMaxV').textContent = s.ab ? s.maxEv.toFixed(1) : '--';
+  document.getElementById('glAvgV').textContent = s.ab ? (s.sumEv / s.ab).toFixed(1) : '--';
+  document.getElementById('glMaxD').textContent = s.ab ? Math.round(s.maxDist) : '--';
+  document.getElementById('glAvgD').textContent = s.ab ? Math.round(s.sumDist / s.ab) : '--';
+  document.getElementById('glHH').textContent   = s.ab ? Math.round(100 * s.hardHit / s.ab) + '%' : '--';
+  document.getElementById('glABH').textContent  = s.h + '-' + s.ab;
+  const arrow = gameState.topBottom === 'top' ? '▲' : '▼';
+  document.getElementById('glGame').textContent = session.mode === 'game'
+    ? arrow + gameState.inning + ' · ' + gameState.awayScore + '–' + gameState.homeScore +
+      ' · ' + gameState.outs + ' OUT'
+    : 'PRACTICE · ' + session.type.toUpperCase();
+  document.getElementById('glRows').innerHTML = hitLog.map(e =>
+    `<div class="grid px-2 htx-row" style="grid-template-columns:22px 36px 38px 32px 42px 34px 38px">` +
+    `<span style="color:#7c8694">${e.n}</span>` +
+    `<span style="color:${e.isHit ? '#35d07f' : '#9aa3ae'};font-weight:700">${e.res}</span>` +
+    `<span>${e.ev}</span><span>${e.la}°</span><span>${e.dist}</span>` +
+    `<span>${e.type}</span><span style="color:#7dd3fc">${e.xba}</span></div>`
+  ).join('');
+  renderChart();
+}
+
+// ── CHARTS (canvas, fed by sessionHits) ──────────────────────────────────────
+const sessionHits = []; // every logged swing: { n, ev, la, dist, x, z, res, isHit }
+const RES_COLOR = {
+  HR:'#ff4d5e', '3B':'#c084fc', '2B':'#fbbf24', '1B':'#35d07f',
+  FO:'#8b95a3', GO:'#6b7280', PU:'#6b7280', DP:'#ef8b8b', E:'#eab308', '—':'#6b7280',
+};
+const CHART_W = 304, CHART_H = 185, CHART_DPR = 2;
+
+function chartCtx() {
+  const cv = document.getElementById('glChart');
+  cv.width  = CHART_W * CHART_DPR;
+  cv.height = CHART_H * CHART_DPR;
+  cv.style.height = CHART_H + 'px';
+  const g = cv.getContext('2d');
+  g.scale(CHART_DPR, CHART_DPR);
+  g.fillStyle = '#0a0d12';
+  g.fillRect(0, 0, CHART_W, CHART_H);
+  g.font = '8px Courier New';
+  return g;
+}
+
+function chartEmpty(g) {
+  g.fillStyle = '#3a4250';
+  g.font = '10px Courier New';
+  g.textAlign = 'center';
+  g.fillText('No hits logged yet', CHART_W / 2, CHART_H / 2);
+}
+
+function renderChart() {
+  const sel = document.getElementById('glChartSel');
+  if (!sel) return;
+  const g = chartCtx();
+  if (!sessionHits.length) { chartEmpty(g); return; }
+  ({ spray: drawSprayChart, zone: drawZoneChart, evla: drawEvLaChart,
+     dist: drawDistChart, trend: drawTrendChart, mix: drawMixChart })[sel.value](g);
+}
+
+// Strike-zone contact chart — where in the zone every swing made contact
+function drawZoneChart(g) {
+  const sx = inches => CHART_W / 2 + inches * 5.2;                       // ±~28 in view
+  const sy = ft => CHART_H - 14 - (ft - 0.5) * ((CHART_H - 28) / 4.3);   // 0.5–4.8 ft
+  // Plate width marker
+  g.strokeStyle = '#334155';
+  g.beginPath(); g.moveTo(sx(-8.5), CHART_H - 8); g.lineTo(sx(8.5), CHART_H - 8); g.stroke();
+  // Player-scaled zone + 3×3 grid
+  const hw = SZ_W * 12 / 2;
+  const x0 = sx(-hw), x1 = sx(hw), y0 = sy(zoneTop), y1 = sy(zoneBot);
+  g.fillStyle = 'rgba(45,212,191,0.06)';
+  g.fillRect(x0, y0, x1 - x0, y1 - y0);
+  g.strokeStyle = 'rgba(45,212,191,0.3)';
+  for (let i = 1; i < 3; i++) {
+    const gx = x0 + (x1 - x0) * i / 3, gy = y0 + (y1 - y0) * i / 3;
+    g.beginPath(); g.moveTo(gx, y0); g.lineTo(gx, y1); g.stroke();
+    g.beginPath(); g.moveTo(x0, gy); g.lineTo(x1, gy); g.stroke();
+  }
+  g.strokeStyle = '#2dd4bf';
+  g.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  const pts = sessionHits.filter(h => h.cy != null);
+  for (const h of pts) {
+    g.fillStyle = RES_COLOR[h.res] || '#6b7280';
+    g.beginPath(); g.arc(sx(h.cx), sy(h.cy), 2.8, 0, Math.PI * 2); g.fill();
+  }
+  if (pts.length) {
+    const avgD = pts.reduce((a, h) => a + h.depth, 0) / pts.length;
+    g.fillStyle = '#fb923c'; g.textAlign = 'left';
+    g.fillText('avg depth ' + (avgD >= 0 ? '+' : '') + avgD.toFixed(1) + '"', 8, 12);
+    g.fillStyle = '#7c8694';
+    g.fillText(pts.length + ' swings', 8, 22);
+  }
+}
+
+// Overhead spray chart — real traced fence + foul lines + distance rings
+function drawSprayChart(g) {
+  const viewFt = 480 * fieldScale;            // view shrinks with the field
+  const s  = (CHART_H - 22) / viewFt;         // ft → px
+  const cx = CHART_W / 2, cy = CHART_H - 12;  // home plate
+  const P  = (x, z) => [cx + x * s, cy + z * s]; // CF is −z (up on screen)
+
+  // Distance rings — step picked to fit the scaled view
+  const ringStep = Math.max(25, Math.ceil(viewFt / 4 / 25) * 25);
+  g.strokeStyle = '#1d2430'; g.setLineDash([3, 3]); g.textAlign = 'center';
+  for (let d = ringStep; d <= viewFt - ringStep / 2; d += ringStep) {
+    g.beginPath(); g.arc(cx, cy, d * s, -Math.PI * 0.75, -Math.PI * 0.25); g.stroke();
+    g.fillStyle = '#3a4250'; g.fillText(d, cx, cy - d * s - 2);
+  }
+  g.setLineDash([]);
+
+  // Foul lines
+  const fl = viewFt * Math.SQRT1_2;
+  g.strokeStyle = '#2c3442';
+  g.beginPath(); g.moveTo(...P(0, 0)); g.lineTo(...P(-fl, -fl)); g.stroke();
+  g.beginPath(); g.moveTo(...P(0, 0)); g.lineTo(...P( fl, -fl)); g.stroke();
+
+  // Infield diamond (drawn at the same scale as the field)
+  const bd = 63.6 * fieldScale;
+  g.strokeStyle = '#39424f';
+  g.beginPath();
+  g.moveTo(...P(0, 0)); g.lineTo(...P(bd, -bd));
+  g.lineTo(...P(0, -bd * 2)); g.lineTo(...P(-bd, -bd));
+  g.closePath(); g.stroke();
+
+  // Fence — the model-traced wall of the current stadium
+  if (wallSplinePts.length > 1) {
+    g.strokeStyle = '#38bdf8'; g.lineWidth = 1.2;
+    g.beginPath();
+    wallSplinePts.forEach((p, i) => {
+      const [px, py] = P(p.x, p.z);
+      i === 0 ? g.moveTo(px, py) : g.lineTo(px, py);
+    });
+    g.stroke(); g.lineWidth = 1;
+  }
+
+  // Hits
+  for (const h of sessionHits) {
+    const [px, py] = P(h.x, h.z);
+    g.fillStyle = RES_COLOR[h.res] || '#6b7280';
+    g.beginPath(); g.arc(px, py, 2.6, 0, Math.PI * 2); g.fill();
+  }
+}
+
+// EV (y) vs LA (x) scatter with the optimal-LA band
+function drawEvLaChart(g) {
+  const L = 26, R = 6, T = 8, B = 16;
+  const px = la => L + (la + 20) / 80  * (CHART_W - L - R);
+  const py = ev => T + (120 - ev) / 80 * (CHART_H - T - B);
+  // Optimal launch window 8–32°
+  g.fillStyle = 'rgba(53,208,127,0.07)';
+  g.fillRect(px(8), T, px(32) - px(8), CHART_H - T - B);
+  // Axes + grid
+  g.strokeStyle = '#1d2430'; g.fillStyle = '#3a4250'; g.textAlign = 'center';
+  for (const la of [-20, 0, 20, 40, 60]) {
+    g.beginPath(); g.moveTo(px(la), T); g.lineTo(px(la), CHART_H - B); g.stroke();
+    g.fillText(la + '°', px(la), CHART_H - 5);
+  }
+  g.textAlign = 'right';
+  for (const ev of [40, 60, 80, 100, 120]) {
+    g.beginPath(); g.moveTo(L, py(ev)); g.lineTo(CHART_W - R, py(ev)); g.stroke();
+    g.fillText(ev, L - 3, py(ev) + 3);
+  }
+  for (const h of sessionHits) {
+    g.fillStyle = RES_COLOR[h.res] || '#6b7280';
+    g.beginPath(); g.arc(px(h.la), py(h.ev), 2.6, 0, Math.PI * 2); g.fill();
+  }
+}
+
+// Distance histogram — bin width scales with the field (50 ft at MLB size)
+function drawDistChart(g) {
+  const binW = Math.max(10, Math.round(50 * fieldScale / 5) * 5);
+  const bins = new Array(10).fill(0);
+  sessionHits.forEach(h => bins[Math.min(9, Math.floor(h.dist / binW))]++);
+  const max = Math.max(...bins, 1);
+  const L = 8, B = 16, bw = (CHART_W - L * 2) / 10;
+  g.textAlign = 'center';
+  bins.forEach((n, i) => {
+    const bh = n / max * (CHART_H - 34);
+    g.fillStyle = '#c8102e';
+    g.fillRect(L + i * bw + 2, CHART_H - B - bh, bw - 4, bh);
+    if (n) { g.fillStyle = '#cfd6de'; g.fillText(n, L + i * bw + bw / 2, CHART_H - B - bh - 3); }
+    g.fillStyle = '#3a4250';
+    g.fillText(i * binW, L + i * bw + bw / 2, CHART_H - 5);
+  });
+}
+
+// EV by swing number with session average
+function drawTrendChart(g) {
+  const L = 26, R = 6, T = 8, B = 16;
+  const n  = sessionHits.length;
+  const px = i  => L + (n === 1 ? 0.5 : i / (n - 1)) * (CHART_W - L - R);
+  const py = ev => T + (120 - ev) / 80 * (CHART_H - T - B);
+  g.strokeStyle = '#1d2430'; g.fillStyle = '#3a4250'; g.textAlign = 'right';
+  for (const ev of [40, 60, 80, 100, 120]) {
+    g.beginPath(); g.moveTo(L, py(ev)); g.lineTo(CHART_W - R, py(ev)); g.stroke();
+    g.fillText(ev, L - 3, py(ev) + 3);
+  }
+  const avg = sessionHits.reduce((a, h) => a + h.ev, 0) / n;
+  g.strokeStyle = '#7dd3fc'; g.setLineDash([4, 3]);
+  g.beginPath(); g.moveTo(L, py(avg)); g.lineTo(CHART_W - R, py(avg)); g.stroke();
+  g.setLineDash([]);
+  g.strokeStyle = '#c8102e';
+  g.beginPath();
+  sessionHits.forEach((h, i) => i === 0 ? g.moveTo(px(i), py(h.ev)) : g.lineTo(px(i), py(h.ev)));
+  g.stroke();
+  sessionHits.forEach((h, i) => {
+    g.fillStyle = RES_COLOR[h.res] || '#6b7280';
+    g.beginPath(); g.arc(px(i), py(h.ev), 2.4, 0, Math.PI * 2); g.fill();
+  });
+  g.fillStyle = '#7dd3fc'; g.textAlign = 'left';
+  g.fillText('avg ' + avg.toFixed(1), L + 2, py(avg) - 3);
+}
+
+// Horizontal bars: count per result type
+function drawMixChart(g) {
+  const order = ['HR', '3B', '2B', '1B', 'FO', 'GO', 'PU', 'DP', 'E'];
+  const counts = {};
+  sessionHits.forEach(h => counts[h.res] = (counts[h.res] || 0) + 1);
+  const rows = order.filter(r => counts[r]);
+  if (!rows.length) { chartEmpty(g); return; }
+  const max = Math.max(...rows.map(r => counts[r]));
+  const rh  = Math.min(18, (CHART_H - 12) / rows.length);
+  rows.forEach((r, i) => {
+    const y = 8 + i * rh;
+    const w = counts[r] / max * (CHART_W - 80);
+    g.fillStyle = RES_COLOR[r];
+    g.fillRect(34, y, w, rh - 5);
+    g.textAlign = 'right'; g.fillText(r, 30, y + rh / 2 + 1);
+    g.textAlign = 'left';  g.fillStyle = '#cfd6de';
+    g.fillText(counts[r], 38 + w, y + rh / 2 + 1);
+  });
+}
+
+// ── ADJUSTABLE OVERLAY (drag title bar / collapse / scale; persisted) ─────────
+(function initOverlayAdjust() {
+  const panel = document.getElementById('gameLogPanel');
+  const bar   = document.getElementById('glTitleBar');
+  const body  = document.getElementById('glBody');
+  const wrap  = document.getElementById('canvasWrap');
+  const KEY   = 'mlbSim_overlay_v1';
+  const SCALES = [1, 1.25, 0.8];
+  let st = {};
+  try { st = JSON.parse(localStorage.getItem(KEY)) || {}; } catch(e) {}
+
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch(e) {} }
+  function apply() {
+    if (st.x != null) {
+      panel.classList.remove('top-3', 'right-4');
+      panel.style.left  = st.x + 'px';
+      panel.style.top   = st.y + 'px';
+      panel.style.right = 'auto';
+      panel.style.transformOrigin = 'top left';
+    } else {
+      panel.style.transformOrigin = 'top right';
+    }
+    panel.style.transform = 'scale(' + (st.scale || 1) + ')';
+    body.style.display = st.collapsed ? 'none' : '';
+    document.getElementById('glCollapse').innerHTML = st.collapsed ? '+' : '&ndash;';
+  }
+
+  let drag = null;
+  bar.addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    const r  = panel.getBoundingClientRect();
+    const wr = wrap.getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, wr };
+    bar.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  bar.addEventListener('pointermove', e => {
+    if (!drag) return;
+    st.x = Math.min(Math.max(0, e.clientX - drag.wr.left - drag.dx), drag.wr.width  - 90);
+    st.y = Math.min(Math.max(0, e.clientY - drag.wr.top  - drag.dy), drag.wr.height - 26);
+    apply();
+  });
+  bar.addEventListener('pointerup',     () => { if (drag) { drag = null; save(); } });
+  bar.addEventListener('pointercancel', () => { drag = null; });
+
+  document.getElementById('glCollapse').addEventListener('click', () => {
+    st.collapsed = !st.collapsed; apply(); save();
+  });
+  document.getElementById('glScale').addEventListener('click', () => {
+    const i = SCALES.indexOf(st.scale || 1);
+    st.scale = SCALES[(i + 1) % SCALES.length]; apply(); save();
+  });
+  apply();
+})();
+
+// ── SESSION MODE, SESSION TYPE & PLAYER PROFILES ─────────────────────────────
+// Game mode: full score/inning/base tracking. Practice mode: stats only.
+// Session types (Tee / Front Toss / Machine / Live) tag every logged swing.
+const SESSION_KEY = 'mlbSim_session_v1';
+const PLAYERS_KEY = 'mlbSim_players_v1';
+
+const session = Object.assign({ mode: 'game', type: 'Tee' }, (() => {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || {}; } catch(e) { return {}; }
+})());
+
+const playersState = (() => {
+  let st = null;
+  try { st = JSON.parse(localStorage.getItem(PLAYERS_KEY)); } catch(e) {}
+  if (!st || !Array.isArray(st.players) || !st.players.length) {
+    st = { players: [{ id: 1, name: 'PLAYER 1', hIn: 72, wLb: 180, bats: 'R' }], activeId: 1, side: 'R' };
+  }
+  return st;
+})();
+
+function saveSession() { try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch(e) {} }
+function savePlayers() { try { localStorage.setItem(PLAYERS_KEY, JSON.stringify(playersState)); } catch(e) {} }
+
+function activePlayer() {
+  return playersState.players.find(p => p.id === playersState.activeId) || playersState.players[0];
+}
+// Effective batting side this swing — switch hitters pick L/R with the toggle
+function battingSide() {
+  const p = activePlayer();
+  return p.bats === 'S' ? (playersState.side || 'R') : p.bats;
+}
+const fmtHeight = hIn => Math.floor(hIn / 12) + "'" + (hIn % 12) + '"';
+
+// Knees ≈ 25% of height, mid-chest ≈ 58.3% — matches the 1.5–3.5 ft zone at 6'0"
+function updateStrikeZoneForPlayer() {
+  const hFt = activePlayer().hIn / 12;
+  zoneBot = hFt * 0.25;
+  zoneTop = hFt * 0.5833;
+  const zh = zoneTop - zoneBot, zc = (zoneTop + zoneBot) / 2;
+  [szFill, szEdges].forEach(m => { m.scale.y = zh / SZ_H; m.position.y = zc; });
+  kneeBar.position.y = zoneBot;
+}
+
+// ── CONTACT POINT (where in the zone + how deep the ball was struck) ─────────
+const contact = { ht: 2.5, side: 0, depth: 4 }; // ft, in, in (+ = out front)
+
+// Gameday-style zone number from the catcher's view: 1 = top-left … 9 = bottom-right
+function zoneNumber(sideIn, htFt) {
+  const halfW = SZ_W * 12 / 2;
+  if (Math.abs(sideIn) > halfW || htFt < zoneBot || htFt > zoneTop) return 0;
+  const col = Math.min(2, Math.floor((sideIn + halfW) / (halfW * 2 / 3)));
+  const row = Math.min(2, Math.floor((zoneTop - htFt) / ((zoneTop - zoneBot) / 3)));
+  return row * 3 + col + 1;
+}
+
+const ZC_W = 112, ZC_H = 148;
+const zcX = inches => ZC_W / 2 + inches * (ZC_W / 32);          // ±16 in view
+const zcY = ft => ZC_H - 10 - (ft - 0.6) * ((ZC_H - 20) / 4.2); // 0.6–4.8 ft view
+
+function drawZoneCanvas() {
+  const cv = document.getElementById('zoneCv');
+  if (!cv) return;
+  const g = cv.getContext('2d');
+  g.setTransform(2, 0, 0, 2, 0, 0);
+  g.fillStyle = '#0b1220';
+  g.fillRect(0, 0, ZC_W, ZC_H);
+  // Plate width marker at the bottom
+  g.strokeStyle = '#334155';
+  g.beginPath(); g.moveTo(zcX(-8.5), ZC_H - 5); g.lineTo(zcX(8.5), ZC_H - 5); g.stroke();
+  // Zone (player-scaled) + 3×3 grid
+  const hw = SZ_W * 12 / 2;
+  const x0 = zcX(-hw), x1 = zcX(hw), y0 = zcY(zoneTop), y1 = zcY(zoneBot);
+  g.fillStyle = 'rgba(45,212,191,0.07)';
+  g.fillRect(x0, y0, x1 - x0, y1 - y0);
+  g.strokeStyle = 'rgba(45,212,191,0.3)';
+  for (let i = 1; i < 3; i++) {
+    const gx = x0 + (x1 - x0) * i / 3, gy = y0 + (y1 - y0) * i / 3;
+    g.beginPath(); g.moveTo(gx, y0); g.lineTo(gx, y1); g.stroke();
+    g.beginPath(); g.moveTo(x0, gy); g.lineTo(x1, gy); g.stroke();
+  }
+  g.strokeStyle = '#2dd4bf';
+  g.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  // Recent contact history, colored by result
+  for (const h of sessionHits.slice(-30)) {
+    if (h.cy == null) continue;
+    g.fillStyle = RES_COLOR[h.res] || '#6b7280';
+    g.beginPath(); g.arc(zcX(h.cx), zcY(h.cy), 2, 0, Math.PI * 2); g.fill();
+  }
+  // Current aim point
+  const px = zcX(contact.side), py = zcY(contact.ht);
+  g.strokeStyle = '#fb923c'; g.lineWidth = 1.5;
+  g.beginPath(); g.arc(px, py, 4.5, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.moveTo(px - 8, py); g.lineTo(px + 8, py); g.stroke();
+  g.beginPath(); g.moveTo(px, py - 8); g.lineTo(px, py + 8); g.stroke();
+  g.lineWidth = 1;
+  const z = zoneNumber(contact.side, contact.ht);
+  const lbl = document.getElementById('ctZoneLbl');
+  if (lbl) lbl.textContent = (z ? 'ZONE ' + z : 'OUT OF ZONE') + ' · ' + battingSide() + 'HH';
+}
+
+function syncContactUI(fromSliders) {
+  if (fromSliders) {
+    contact.ht    = parseFloat(document.getElementById('ctHt').value);
+    contact.side  = parseFloat(document.getElementById('ctSide').value);
+    contact.depth = parseFloat(document.getElementById('ctDepth').value);
+  } else {
+    document.getElementById('ctHt').value    = contact.ht;
+    document.getElementById('ctSide').value  = contact.side;
+    document.getElementById('ctDepth').value = contact.depth;
+  }
+  document.getElementById('ctHtVal').textContent    = contact.ht.toFixed(2);
+  document.getElementById('ctSideVal').textContent  = contact.side.toFixed(1);
+  document.getElementById('ctDepthVal').textContent = (contact.depth >= 0 ? '+' : '') + contact.depth.toFixed(1);
+  drawZoneCanvas();
+}
+
+// ── SESSION / PLAYER UI ──────────────────────────────────────────────────────
+function setSessionMode(mode) {
+  session.mode = mode;
+  saveSession();
+  document.getElementById('sessGame').classList.toggle('active', mode === 'game');
+  document.getElementById('sessPractice').classList.toggle('active', mode === 'practice');
+  document.getElementById('gameStatePanel').style.display = mode === 'game' ? '' : 'none';
+  document.getElementById('sessHint').textContent = mode === 'game'
+    ? 'Game tracks score, innings & bases.'
+    : 'Practice logs metrics only — no scoring.';
+  // HitTrax red in game, TrackMan orange in practice
+  document.getElementById('glTitleBar').style.background = mode === 'game' ? '#c8102e' : '#c2410c';
+  renderSessionUI();
+}
+
+function renderSessionUI() {
+  const chip = document.getElementById('sessChip');
+  chip.textContent = (session.mode === 'game' ? 'GAME' : 'PRACTICE') + ' · ' + session.type.toUpperCase();
+  chip.style.background = session.mode === 'game' ? '#4c0519' : '#7c2d12';
+  chip.style.color      = session.mode === 'game' ? '#fda4af' : '#fdba74';
+  const st = document.getElementById('glSessType');
+  if (st) st.textContent = session.type.toUpperCase();
+  renderGameLog();
+}
+
+function renderPlayerUI() {
+  const sel = document.getElementById('playerSelect');
+  sel.innerHTML = playersState.players.map(p =>
+    `<option value="${p.id}"${p.id === playersState.activeId ? ' selected' : ''}>${p.name}</option>`
+  ).join('');
+  const p = activePlayer();
+  const batsTxt = p.bats === 'S' ? 'Switch' : p.bats === 'L' ? 'Left' : 'Right';
+  document.getElementById('plInfo').textContent = fmtHeight(p.hIn) + ' · ' + p.wLb + ' lb · Bats ' + batsTxt;
+  const sideRow = document.getElementById('plSideRow');
+  sideRow.style.display = p.bats === 'S' ? 'flex' : 'none';
+  document.getElementById('plSideL').classList.toggle('active', battingSide() === 'L');
+  document.getElementById('plSideR').classList.toggle('active', battingSide() === 'R');
+  document.getElementById('glPlName').textContent = p.name.toUpperCase();
+  document.getElementById('glPlMeta').textContent =
+    fmtHeight(p.hIn) + ' · ' + p.wLb + ' · ' + (p.bats === 'S' ? 'S(' + battingSide() + ')' : p.bats);
+  updateStrikeZoneForPlayer();
+  syncContactUI(false);
+  renderGameLog();
+}
+
+let plFormMode = null; // 'new' | 'edit'
+function openPlForm(mode) {
+  plFormMode = mode;
+  const p = activePlayer();
+  document.getElementById('plName').value = mode === 'edit' ? p.name : '';
+  document.getElementById('plHt').value   = mode === 'edit' ? p.hIn  : 72;
+  document.getElementById('plWt').value   = mode === 'edit' ? p.wLb  : 180;
+  document.getElementById('plBats').value = mode === 'edit' ? p.bats : 'R';
+  document.getElementById('plDeleteBtn').style.display = mode === 'edit' ? '' : 'none';
+  document.getElementById('plForm').style.display = 'flex';
+}
+function closePlForm() { plFormMode = null; document.getElementById('plForm').style.display = 'none'; }
+
+function savePlForm() {
+  const name = document.getElementById('plName').value.trim() || 'PLAYER';
+  const hIn  = Math.min(84, Math.max(48, parseInt(document.getElementById('plHt').value) || 72));
+  const wLb  = Math.min(320, Math.max(60, parseInt(document.getElementById('plWt').value) || 180));
+  const bats = document.getElementById('plBats').value;
+  if (plFormMode === 'edit') {
+    Object.assign(activePlayer(), { name, hIn, wLb, bats });
+  } else {
+    const id = Date.now();
+    playersState.players.push({ id, name, hIn, wLb, bats });
+    playersState.activeId = id;
+  }
+  savePlayers();
+  closePlForm();
+  renderPlayerUI();
+}
+
+function deletePlayer() {
+  playersState.players = playersState.players.filter(p => p.id !== playersState.activeId);
+  if (!playersState.players.length) {
+    playersState.players = [{ id: 1, name: 'PLAYER 1', hIn: 72, wLb: 180, bats: 'R' }];
+  }
+  playersState.activeId = playersState.players[0].id;
+  savePlayers();
+  closePlForm();
+  renderPlayerUI();
+}
+
+function initSessionUI() {
+  document.getElementById('sessGame').addEventListener('click', () => setSessionMode('game'));
+  document.getElementById('sessPractice').addEventListener('click', () => setSessionMode('practice'));
+  const st = document.getElementById('sessType');
+  st.value = session.type;
+  st.addEventListener('change', e => { session.type = e.target.value; saveSession(); renderSessionUI(); });
+
+  document.getElementById('playerSelect').addEventListener('change', e => {
+    playersState.activeId = parseInt(e.target.value);
+    savePlayers();
+    closePlForm();
+    renderPlayerUI();
+  });
+  document.getElementById('plAddBtn').addEventListener('click', () => openPlForm('new'));
+  document.getElementById('plEditBtn').addEventListener('click', () => openPlForm('edit'));
+  document.getElementById('plSaveBtn').addEventListener('click', savePlForm);
+  document.getElementById('plCancelBtn').addEventListener('click', closePlForm);
+  document.getElementById('plDeleteBtn').addEventListener('click', deletePlayer);
+  document.getElementById('plSideL').addEventListener('click', () => { playersState.side = 'L'; savePlayers(); renderPlayerUI(); });
+  document.getElementById('plSideR').addEventListener('click', () => { playersState.side = 'R'; savePlayers(); renderPlayerUI(); });
+
+  ['ctHt', 'ctSide', 'ctDepth'].forEach(id =>
+    document.getElementById(id).addEventListener('input', () => syncContactUI(true)));
+
+  // Click / drag on the mini zone sets contact height + side
+  const cv = document.getElementById('zoneCv');
+  const aimFromEvent = e => {
+    const r = cv.getBoundingClientRect();
+    const xCss = (e.clientX - r.left) * (ZC_W / r.width);
+    const yCss = (e.clientY - r.top)  * (ZC_H / r.height);
+    contact.side = Math.min(14, Math.max(-14, (xCss - ZC_W / 2) / (ZC_W / 32)));
+    contact.ht   = Math.min(4.6, Math.max(0.8, 0.6 + (ZC_H - 10 - yCss) / ((ZC_H - 20) / 4.2)));
+    contact.side = Math.round(contact.side * 2) / 2;
+    contact.ht   = Math.round(contact.ht * 20) / 20;
+    syncContactUI(false);
+  };
+  let zoneDrag = false;
+  cv.addEventListener('pointerdown', e => { zoneDrag = true; cv.setPointerCapture(e.pointerId); aimFromEvent(e); });
+  cv.addEventListener('pointermove', e => { if (zoneDrag) aimFromEvent(e); });
+  cv.addEventListener('pointerup',   () => { zoneDrag = false; });
+
+  setSessionMode(session.mode);
+  renderPlayerUI();
+}
+
+// ── EXTERNAL HIT API (OVLM launch-monitor integration) ────────────────────────
+// Replays a measured ball flight from real metrics. Entry points:
+//   • window.simulateHit({ exitVelocity, launchAngle, sprayAngle, backspin?,
+//       sidespin?, spin?: { rpm, axis:[x,y,z], efficiency } })
+//   • window.postMessage({ type:'ovlm:hit', ...same fields }, '*')
+//   • BroadcastChannel('ovlm-sim') with the same payload (same-origin tabs)
+//   • URL params: ?ev=98&la=25&spray=-8&backspin=2100&sidespin=-300
+// Hits arriving before the stadiums finish loading are queued.
+let   extReady = false;
+const extQueue = [];
+
+function applyExternalHit(m) {
+  if (!m || typeof m !== 'object') return false;
+  const ev = parseFloat(m.exitVelocity ?? m.ev);
+  const la = parseFloat(m.launchAngle ?? m.la);
+  if (!isFinite(ev) || !isFinite(la)) return false;
+  if (!extReady) { extQueue.push(m); return true; }
+  const sa = parseFloat(m.sprayAngle ?? m.spray ?? 0) || 0;
+
+  // Spin: explicit backspin/sidespin win; otherwise decompose a measured spin
+  // vector (rpm + unit axis + efficiency) — vertical axis component = sidespin.
+  let bs = parseFloat(m.backspin), ss = parseFloat(m.sidespin);
+  if (!isFinite(bs)) {
+    if (m.spin && isFinite(m.spin.rpm)) {
+      const eff = isFinite(m.spin.efficiency) ? m.spin.efficiency : 0.9;
+      const transverse = m.spin.rpm * eff;
+      const axY = Array.isArray(m.spin.axis) ? (m.spin.axis[1] || 0) : 0;
+      if (!isFinite(ss)) ss = -transverse * axY;
+      bs = transverse * Math.sqrt(Math.max(0, 1 - axY * axY));
+    } else bs = 1800; // typical batted-ball backspin when unmeasured
+  }
+  if (!isFinite(ss)) ss = 0;
+
+  const setSlider = (id, valId, v, lo, hi) => {
+    const el = document.getElementById(id);
+    el.value = Math.min(hi, Math.max(lo, Math.round(v)));
+    document.getElementById(valId).textContent = el.value;
+  };
+  if (appMode !== 'hit') setMode('hit');
+  setSlider('exitVelocity', 'evVal', ev, 40, 120);
+  setSlider('launchAngle',  'laVal', la, -20, 60);
+  setSlider('sprayAngle',   'saVal', sa, -45, 45);
+  setSlider('backspin',     'bsVal', bs, -1000, 4000);
+  setSlider('sidespin',     'ssVal', ss, -2500, 2500);
+  launch();
+  return true;
+}
+window.simulateHit = applyExternalHit;
+
+window.addEventListener('message', e => {
+  if (e.data && e.data.type === 'ovlm:hit') applyExternalHit(e.data);
+});
+try {
+  const extBC = new BroadcastChannel('ovlm-sim');
+  extBC.onmessage = e => { if (e.data && e.data.type === 'ovlm:hit') applyExternalHit(e.data); };
+} catch(e) {}
+
+// Called once all stadiums are loaded: flush queue, answer URL params,
+// and tell the opener (OVLM dashboard) we can take hits.
+function externalApiReady() {
+  extReady = true;
+  const qp = new URLSearchParams(location.search);
+  if (qp.has('ev') && qp.has('la')) {
+    extQueue.push({
+      ev: qp.get('ev'), la: qp.get('la'), spray: qp.get('spray'),
+      backspin: qp.get('backspin'), sidespin: qp.get('sidespin'),
+    });
+  }
+  const q = extQueue.splice(0);
+  q.forEach(m => applyExternalHit(m));
+  [window.opener, window.parent !== window ? window.parent : null].forEach(w => {
+    if (w) { try { w.postMessage({ type: 'ovlm:sim-ready' }, '*'); } catch(e) {} }
+  });
+}
+
+// ── PHYSICS ──────────────────────────────────────────────────────────────────
+const WALL_HEIGHT   = 8;    // ft — typical MLB fence height
+const WALL_COR      = 0.38; // energy retained on wall bounce
+const ROLL_FRICTION = 8.5;  // ft/s² grass deceleration
+const BOUNCE_COR    = 0.40; // ground bounce coefficient of restitution
+const BOUNCE_DAMP_H = 0.85; // horizontal speed retained per bounce
+
+let simActive     = false;
+let simRolling    = false;
+let rollBounces   = 0;
+let clearedFence  = false; // true once ball flies over the top of the wall
+const simPos = new THREE.Vector3();
+const simVel = new THREE.Vector3();
+let simTime = 0, simMaxY = 0;
+const simDt = 1/FPS_SIM;
+
+// Batted-ball spin — world-space axis fixed at contact, drives Magnus lift/curve
+const hitSpinHat = new THREE.Vector3();
+let hitSpinW = 0; // rad/s
+
+// Landing point of the most recent hit (for the spray chart)
+let lastLand = { x: 0, z: 0 };
+
+// Ray–segment intersection against the exact fence spline drawn on screen.
+// Ray: t*(dx,dz) from origin; segment: (ax,az)→(bx,bz). Cramer's rule.
+function wallRadiusAtAngle(sprayDeg) {
+  if (wallSplinePts.length < 2) return 999;
+  const r  = sprayDeg * Math.PI / 180;
+  const dx = Math.sin(r), dz = -Math.cos(r); // unit direction (CF = -Z)
+  let bestT = 999;
+  for (let i = 0; i < wallSplinePts.length - 1; i++) {
+    const ax = wallSplinePts[i].x,   az = wallSplinePts[i].z;
+    const bx = wallSplinePts[i+1].x, bz = wallSplinePts[i+1].z;
+    const sbx = bx - ax, sbz = bz - az;
+    const det = dz * sbx - dx * sbz;
+    if (Math.abs(det) < 1e-9) continue;
+    const rayT = (az * sbx - ax * sbz) / det; // distance along ray
+    const segT = (az * dx  - ax * dz)  / det; // 0–1 along segment
+    if (rayT > 0 && segT >= 0 && segT <= 1 && rayT < bestT) bestT = rayT;
+  }
+  return bestT;
+}
+
+function getOutcome(dist, la, sa) {
+  const ev = parseFloat(document.getElementById('exitVelocity').value);
+  const m  = xStats(ev, la, sa || 0);
+  let code;
+  if (clearedFence) {
+    code = EC.HR; // physically over the fence — always a homer
+  } else {
+    // In the park: the HR probability mass becomes wall-ball XBH / long outs
+    // Distance thresholds scale with the field so youth fields classify sanely
+    const k  = fieldScale;
+    const p3 = m.p3 + m.phr * 0.15;
+    const p2 = m.p2 + m.phr * 0.55;
+    const r  = Math.random();
+    if      (r < p3)               code = EC.Triple;
+    else if (r < p3 + p2)          code = dist > 300*k ? EC.LongDouble : EC.ShortDouble;
+    else if (r < p3 + p2 + m.p1)   code = dist > 250*k ? EC.LongSingle : dist > 170*k ? EC.MediumSingle : EC.ShortSingle;
+    else if (la < 8)               code = (dist < 105*k && Math.abs(sa||0) < 28 && Math.random() < 0.3) ? EC.GIDP : EC.Grounder;
+    else if (la > 50)              code = dist < 170*k ? EC.InfieldFly : EC.ShortFly;
+    else if (la > 25)              code = dist > 295*k ? EC.LongFly : dist > 200*k ? EC.MediumFly : EC.ShortFly;
+    else                           code = dist > 250*k ? EC.LongFly : EC.MediumFly; // line out
+  }
+  const meta = EC_META[code];
+  return {
+    text: meta.label.split('—')[0].trim(), cls: meta.cls, code,
+    xba: m.xba,
+    type: la < 10 ? 'GB' : la < 25 ? 'LD' : la < 50 ? 'FB' : 'PU',
+  };
+}
+
+function setMetrics(dist, maxH, hang, ev, outcome) {
+  document.getElementById('mDist').textContent   = dist  != null ? Math.round(dist)  : '--';
+  document.getElementById('mHeight').textContent = maxH  != null ? Math.round(maxH)  : '--';
+  document.getElementById('mHang').textContent   = hang  != null ? hang.toFixed(2)   : '--';
+  document.getElementById('mEV').textContent     = ev;
+  const el = document.getElementById('mOutcome');
+  el.className = 'text-2xl font-black tracking-wider';
+  if (outcome) {
+    el.textContent = outcome.text; el.classList.add(outcome.cls);
+    const ecEl = document.getElementById('mEventCode');
+    if (ecEl) ecEl.textContent = EC_META[outcome.code]?.label || '—';
+    if (session.mode === 'game') advanceGameState(outcome.code); // practice: no scoring
+    logHit(dist, ev, outcome);
+    showPlayBanner(outcome.code, dist);
+  } else {
+    el.textContent = 'READY'; el.classList.add('outcome-idle');
+    const ecEl = document.getElementById('mEventCode');
+    if (ecEl) ecEl.textContent = '—';
+  }
+}
+
+function launch() {
+  const ev  = parseFloat(document.getElementById('exitVelocity').value);
+  const la  = parseFloat(document.getElementById('launchAngle').value);
+  const sa  = parseFloat(document.getElementById('sprayAngle').value);
+  const evS = ev * 5280/3600;
+  const laR = THREE.MathUtils.degToRad(la);
+  const saR = THREE.MathUtils.degToRad(sa);
+  const vH  = evS * Math.cos(laR);
+  const bX  = vH  * Math.cos(saR);
+  const bZ  = vH  * Math.sin(saR);
+  simVel.set(
+    Math.cos(LAUNCH_YAW)*bX - Math.sin(LAUNCH_YAW)*bZ,
+    evS * Math.sin(laR),
+    Math.sin(LAUNCH_YAW)*bX + Math.cos(LAUNCH_YAW)*bZ
+  );
+  // Spin axis (fixed in world space at contact):
+  //   backspin axis = v̂_h × up → Magnus lift; topspin (negative) pushes down
+  //   sidespin on −y → positive slider curves the ball toward RF (+x)
+  const bsRpm = parseFloat(document.getElementById('backspin').value) || 0;
+  const ssRpm = parseFloat(document.getElementById('sidespin').value) || 0;
+  const radS  = Math.PI / 30; // rpm → rad/s
+  const vh    = Math.hypot(simVel.x, simVel.z);
+  const spinVec = new THREE.Vector3(
+    vh > 1e-6 ? -simVel.z / vh * bsRpm * radS : 0,
+    -ssRpm * radS,
+    vh > 1e-6 ?  simVel.x / vh * bsRpm * radS : 0
+  );
+  hitSpinW = spinVec.length();
+  if (hitSpinW > 1e-6) hitSpinHat.copy(spinVec).divideScalar(hitSpinW);
+
+  // Ball leaves from the contact point: side/depth in inches, height in feet
+  // (+depth = out front of the plate, toward the pitcher = −Z)
+  simPos.set(contact.side / 12, contact.ht, -contact.depth / 12);
+  simTime=0; simMaxY=0; simActive=true; simRolling=false; rollBounces=0; clearedFence=false;
+  trailReset(); tracerReset();
+  ball.visible=true; ballGlow.visible=true; ballShadow.visible=true;
+  landGroup.visible=false;
+  setMetrics(null,null,null,ev,null);
+}
+
+function stepRolling(dt) {
+  if (!simRolling) return;
+  const hSpeed = Math.sqrt(simVel.x*simVel.x + simVel.z*simVel.z);
+  if (hSpeed < 0.5) {
+    simRolling = false;
+    const d2 = Math.sqrt(simPos.x*simPos.x+simPos.z*simPos.z);
+    document.getElementById('hud').textContent =
+      'Stop  dist:'+d2.toFixed(0)+' ft  X:'+simPos.x.toFixed(1)+'  Z:'+simPos.z.toFixed(1);
+    return;
+  }
+  const decel = Math.min(ROLL_FRICTION * dt, hSpeed);
+  const ratio  = (hSpeed - decel) / hSpeed;
+  simVel.x *= ratio; simVel.z *= ratio;
+
+  const nx = simPos.x + simVel.x * dt;
+  const nz = simPos.z + simVel.z * dt;
+  const nR = Math.sqrt(nx*nx + nz*nz);
+  const sprayR = Math.atan2(nx, -nz) * 180/Math.PI;
+
+  // Wall collision while rolling — try mesh raycaster first, fall back to polygon
+  if (!clearedFence && Math.abs(sprayR) <= 47) {
+    const rollDir = new THREE.Vector3(simVel.x, 0, simVel.z).normalize();
+    const rollFrom = simPos.clone();
+    rollFrom.y = 0.5; // slightly above ground for the roll ray
+    const rollDist = Math.sqrt(simVel.x*simVel.x+simVel.z*simVel.z) * dt + BALL_RADIUS * 2;
+    const rollHit = checkCollisionRaw(rollFrom, rollDir, rollDist);
+    if (rollHit) {
+      const n = rollHit.normal;
+      const vDotN = simVel.x*n.x + simVel.z*n.z;
+      if (vDotN < 0) {
+        const ref = reflectVector(new THREE.Vector3(simVel.x, 0, simVel.z),
+                                  new THREE.Vector3(n.x, 0, n.z).normalize());
+        simVel.x = ref.x * WALL_COR;
+        simVel.z = ref.z * WALL_COR;
+      }
+      return;
+    }
+    // Polygon fallback
+    const wallR = wallRadiusAtAngle(sprayR);
+    if (nR >= wallR - BALL_RADIUS) {
+      const curR = Math.max(Math.sqrt(simPos.x*simPos.x+simPos.z*simPos.z), 0.01);
+      const wx = -simPos.x/curR, wz = -simPos.z/curR;
+      const vDotN = simVel.x*wx + simVel.z*wz;
+      if (vDotN < 0) {
+        simVel.x -= 2 * vDotN * wx; simVel.z -= 2 * vDotN * wz;
+        simVel.x *= WALL_COR;       simVel.z *= WALL_COR;
+      }
+      return;
+    }
+  }
+
+  simPos.x = nx; simPos.z = nz; simPos.y = 0;
+  trailPush(simPos.x, 0, simPos.z);
+  tracerPush(simPos.x, 0, simPos.z);
+  ball.position.set(simPos.x, 0.12, simPos.z);
+  const d2 = Math.sqrt(simPos.x*simPos.x+simPos.z*simPos.z);
+  document.getElementById('hud').textContent = 'Rolling  dist:'+d2.toFixed(0)+' ft';
+}
+
+// ── MESH COLLISION SYSTEM ─────────────────────────────────────────────────────
+// Uses THREE.Raycaster against the actual stadium GLB geometry to detect:
+//   wall hits / ricochets / Green Monster / structure collisions.
+// Ground detection keeps the fast y≤0 plane (field calibrated at launch).
+// HR clearance detection keeps the fast wallRadiusAtAngle polar check.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const meshRC = new THREE.Raycaster();
+let   collisionMeshes = []; // filtered subset built once per stadium switch
+
+// Build the per-stadium collision mesh list.
+// Filters out tiny decorative items (seats, signs) and high upper-deck structure.
+// Must be called AFTER the stadium model is repositioned (applyModelPosition).
+function buildCollisionMeshes() {
+  collisionMeshes = [];
+  if (!activeGroup) return;
+  activeGroup.updateMatrixWorld(true);
+  const _b = new THREE.Box3();
+  activeGroup.traverse(obj => {
+    if (!obj.isMesh || !obj.geometry) return;
+    _b.setFromObject(obj);
+    const sy  = _b.max.y - _b.min.y;
+    const sxz = Math.max(_b.max.x - _b.min.x, _b.max.z - _b.min.z);
+    if (sxz < 4 * fieldScale && sy < 4 * fieldScale) return; // skip tiny decorative objects
+    if (_b.min.y > 35 * fieldScale) return; // skip upper deck / light poles (scaled)
+    collisionMeshes.push(obj);
+  });
+}
+
+// Auto-level: find the model's field surface and shift the model so it sits at
+// y = 0 (the simulation ground plane). Some GLBs have foundations below grade,
+// which breaks the 8% baseSinkY heuristic (e.g. LAD floats ~47 ft up).
+// Casts downward rays at guaranteed in-play outfield spots; median hit = field.
+function autoLevelField(filename) {
+  const entry = cache[filename];
+  if (!entry) return;
+  const spots = [[0,-220],[0,-300],[-150,-260],[150,-260],[-80,-180],[80,-180]]
+    .map(([x,z]) => [x * fieldScale, z * fieldScale]); // stay inside scaled outfield
+  const ys = [];
+  for (const [x,z] of spots) {
+    _wpOrigin.set(x, 80, z);
+    _wpDir.set(0, -1, 0);
+    meshRC.set(_wpOrigin, _wpDir);
+    meshRC.near = 0; meshRC.far = 300;
+    let best = null;
+    entry.grp.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry) return;
+      const hits = meshRC.intersectObject(obj, false);
+      for (const h of hits) if (!best || h.distance < best.distance) best = h;
+    });
+    if (best) ys.push(best.point.y);
+  }
+  if (ys.length < 3) return;
+  ys.sort((a,b) => a - b);
+  const fieldY = ys[Math.floor(ys.length / 2)];
+  if (Math.abs(fieldY) < 1.5) return; // already level
+  entry.grp.position.y -= fieldY;
+  entry.grp.updateMatrixWorld(true);
+  buildCollisionMeshes(); // height filters depend on world Y — rebuild
+  console.log('auto-leveled ' + filename + ': field surface was at y=' + fieldY.toFixed(1) + ' ft');
+}
+
+// ── CROWD ────────────────────────────────────────────────────────────────────
+// Instanced low-poly fans scattered over upward-facing seating surfaces of the
+// active GLB (triangles 8–105 ft up, 80–900 ft from the plate, area-weighted).
+// Two InstancedMeshes share the same per-fan matrices: shirts + heads.
+const CROWD_MAX  = 12000;
+const fanBodyGeo = new THREE.BoxGeometry(1.15, 1.9, 0.85); fanBodyGeo.translate(0, 0.95, 0);
+const fanHeadGeo = new THREE.SphereGeometry(0.42, 6, 5);   fanHeadGeo.translate(0, 2.25, 0);
+const fanBodyMat = new THREE.MeshLambertMaterial();
+const fanHeadMat = new THREE.MeshLambertMaterial();
+const SKIN_TONES = [0xffdbac, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524].map(c => new THREE.Color(c));
+let crowdBodies = null, crowdHeads = null;
+
+function clearCrowd() {
+  [crowdBodies, crowdHeads].forEach(m => { if (m) { scene.remove(m); m.dispose(); } });
+  crowdBodies = crowdHeads = null;
+}
+
+function buildCrowd(filename) {
+  clearCrowd();
+  const entry = cache[filename];
+  if (!entry) return;
+  const t0 = performance.now();
+
+  // Gather candidate seating triangles in world space
+  const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), nm = new THREE.Vector3();
+  const tris = [], cumArea = [];
+  let totalArea = 0;
+  entry.grp.updateMatrixWorld(true);
+  entry.grp.traverse(obj => {
+    if (!obj.isMesh || !obj.geometry || !obj.geometry.attributes.position) return;
+    const posA = obj.geometry.attributes.position, idx = obj.geometry.index;
+    const count = idx ? idx.count : posA.count;
+    for (let i = 0; i < count; i += 3) {
+      va.fromBufferAttribute(posA, idx ? idx.getX(i)   : i  ).applyMatrix4(obj.matrixWorld);
+      vb.fromBufferAttribute(posA, idx ? idx.getX(i+1) : i+1).applyMatrix4(obj.matrixWorld);
+      vc.fromBufferAttribute(posA, idx ? idx.getX(i+2) : i+2).applyMatrix4(obj.matrixWorld);
+      const cy = (va.y + vb.y + vc.y) / 3;
+      if (cy < 8 * fieldScale || cy > 105 * fieldScale) continue;
+      const rr = Math.hypot((va.x + vb.x + vc.x) / 3, (va.z + vb.z + vc.z) / 3);
+      if (rr < 80 * fieldScale || rr > 900 * fieldScale) continue;
+      e1.subVectors(vb, va); e2.subVectors(vc, va); nm.crossVectors(e1, e2);
+      const a2 = nm.length(); if (a2 < 1e-6) continue;
+      const ny = nm.y / a2;
+      if (ny < 0.55) continue;                 // risers / walls
+      const area = a2 / 2;
+      if (ny > 0.985 && area > 700) continue;  // big flat slabs = concourse/roof decks
+      totalArea += area;
+      cumArea.push(totalArea);
+      tris.push(va.x,va.y,va.z, vb.x,vb.y,vb.z, vc.x,vc.y,vc.z);
+    }
+  });
+  if (!cumArea.length) return;
+
+  const count = Math.max(800, Math.min(CROWD_MAX, Math.round(totalArea / 22)));
+  crowdBodies = new THREE.InstancedMesh(fanBodyGeo, fanBodyMat, count);
+  crowdHeads  = new THREE.InstancedMesh(fanHeadGeo, fanHeadMat, count);
+
+  const team = TEAM_COLORS[filename] || { primary: 0x335577, secondary: 0xcccccc };
+  const shirts = [
+    new THREE.Color(team.primary), new THREE.Color(team.primary), new THREE.Color(team.secondary),
+    new THREE.Color(0xf5f5f5), new THREE.Color(0xb9c2cc), new THREE.Color(0x36404d),
+    new THREE.Color(0x7a8b99), new THREE.Color(0xc23b3b), new THREE.Color(0xd9b23a),
+  ];
+  const mtx = new THREE.Matrix4(), quat = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), scl = new THREE.Vector3();
+
+  for (let i = 0; i < count; i++) {
+    // Area-weighted triangle pick (binary search the cumulative table)
+    const r = Math.random() * totalArea;
+    let lo = 0, hi = cumArea.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cumArea[mid] < r) lo = mid + 1; else hi = mid; }
+    const o = lo * 9;
+    // Random barycentric point on the triangle
+    let u = Math.random(), v = Math.random();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    const w = 1 - u - v;
+    pos.set(
+      tris[o]   * w + tris[o+3] * u + tris[o+6] * v,
+      tris[o+1] * w + tris[o+4] * u + tris[o+7] * v,
+      tris[o+2] * w + tris[o+5] * u + tris[o+8] * v
+    );
+    // Face the plate, with jitter
+    quat.setFromAxisAngle(up, Math.atan2(-pos.x, -pos.z) + (Math.random() - 0.5) * 0.6);
+    const s = 0.85 + Math.random() * 0.3;
+    scl.set(s, s * (0.9 + Math.random() * 0.25), s);
+    mtx.compose(pos, quat, scl);
+    crowdBodies.setMatrixAt(i, mtx);
+    crowdHeads.setMatrixAt(i, mtx);
+    crowdBodies.setColorAt(i, shirts[(Math.random() * shirts.length) | 0]);
+    crowdHeads.setColorAt(i, SKIN_TONES[(Math.random() * SKIN_TONES.length) | 0]);
+  }
+  crowdBodies.instanceMatrix.needsUpdate = true;
+  crowdHeads.instanceMatrix.needsUpdate = true;
+  if (crowdBodies.instanceColor) crowdBodies.instanceColor.needsUpdate = true;
+  if (crowdHeads.instanceColor)  crowdHeads.instanceColor.needsUpdate = true;
+  scene.add(crowdBodies, crowdHeads);
+  console.log('crowd ' + filename + ': ' + count + ' fans on ' + cumArea.length + ' tris, ' +
+              Math.round(performance.now() - t0) + ' ms');
+}
+
+// Console debug hook: window._sim.probe(deg, y) → fence distance at spray angle
+window._sim = {
+  get meshes() { return collisionMeshes; },
+  get group()  { return activeGroup; },
+  get profile() { return activeWallProfile; },
+  probe: (deg, y, minD) => probeWallDist(deg, y, minD != null ? minD : WALL_SAMPLE_MIN_D),
+};
+
+// Reflect velocity v across surface normal n.
+// v' = v − 2(v·n)n  (does not mutate v)
+function reflectVector(v, n) {
+  return v.clone().sub(n.clone().multiplyScalar(2 * v.dot(n)));
+}
+
+// Low-level ray cast: from `origin` in direction `dir` (normalised) up to `maxDist`.
+// Returns { point, normal, distance } or null.
+// `dir` must already be normalised. Used by both checkCollision and stepRolling.
+function checkCollisionRaw(origin, dir, maxDist) {
+  if (collisionMeshes.length === 0) return null;
+  meshRC.set(origin, dir);
+  meshRC.near = 0;
+  meshRC.far  = maxDist;
+  let best = null;
+  for (const mesh of collisionMeshes) {
+    const hits = meshRC.intersectObject(mesh, false);
+    for (const h of hits) {
+      if (!h.face) continue;
+      if (h.point.y > origin.y + 20) continue; // ignore upper-deck overhangs
+      if (!best || h.distance < best.distance) {
+        const n = h.face.normal.clone()
+          .transformDirection(mesh.matrixWorld)
+          .normalize();
+        best = { point: h.point.clone(), normal: n, distance: h.distance };
+      }
+    }
+  }
+  return best;
+}
+
+// Cast a ray from `from` toward `to`, testing all collisionMeshes.
+// Returns the closest valid hit or null.
+function checkCollision(from, to) {
+  const seg  = to.clone().sub(from);
+  const dist = seg.length();
+  if (dist < 1e-5) return null;
+  return checkCollisionRaw(from, seg.divideScalar(dist), dist + BALL_RADIUS * 4);
+}
+
+// Apply a mesh collision response to simPos / simVel.
+//   normal.y > 0.6  → ground / upward-facing surface (bounce / settle)
+//   normal.y < 0.4  → wall  / mostly-vertical surface (ricochet)
+function handleBounce(col) {
+  const { point, normal } = col;
+  // Push ball off the surface so it isn't immediately re-detected next step.
+  simPos.copy(point).addScaledVector(normal, BALL_RADIUS * 1.5);
+
+  const isGround = normal.y > 0.6;
+
+  if (isGround) {
+    // ── Ground or terrain hit ──
+    if (rollBounces === 0) {
+      const dist = Math.sqrt(simPos.x*simPos.x + simPos.z*simPos.z);
+      const la = parseFloat(document.getElementById('launchAngle').value);
+      const sa = parseFloat(document.getElementById('sprayAngle').value);
+      const ev = parseFloat(document.getElementById('exitVelocity').value);
+      lastLand = { x: simPos.x, z: simPos.z };
+      setMetrics(dist, simMaxY, simTime, ev, getOutcome(dist, la, sa));
+      landGroup.position.set(simPos.x, 0, simPos.z);
+      landGroup.visible = true;
+      ballGlow.visible  = false;
+    }
+    if (rollBounces < 2 && Math.abs(simVel.y) > 6) {
+      const ref = reflectVector(simVel, normal);
+      simVel.set(ref.x * BOUNCE_DAMP_H, ref.y * BOUNCE_COR, ref.z * BOUNCE_DAMP_H);
+      simPos.y = BALL_RADIUS;
+      rollBounces++;
+    } else {
+      simVel.y  = 0; simActive = false; simRolling = true;
+      ballShadow.visible = false;
+    }
+
+  } else {
+    // ── Wall / structure hit ──
+    // Reflect horizontally; walls kill vertical component (ball drops off face).
+    const ref = reflectVector(simVel, normal);
+    simVel.set(ref.x * WALL_COR, 0, ref.z * WALL_COR);
+    simActive = false; simRolling = true;
+    ballGlow.visible = false; ballShadow.visible = false;
+
+    if (rollBounces === 0) {
+      const dist = Math.sqrt(point.x*point.x + point.z*point.z);
+      const la = parseFloat(document.getElementById('launchAngle').value);
+      const sa = parseFloat(document.getElementById('sprayAngle').value);
+      const ev = parseFloat(document.getElementById('exitVelocity').value);
+      lastLand = { x: point.x, z: point.z };
+      setMetrics(dist, simMaxY, simTime, ev, getOutcome(dist, la, sa));
+      landGroup.position.set(simPos.x, 0, simPos.z);
+      landGroup.visible = true;
+    }
+  }
+}
+
+// ── updateBall ────────────────────────────────────────────────────────────────
+// Per-tick ball step. Replaces stepPhysics() in the animation loop.
+// Order of checks:
+//   1. Mesh collision  — wall/structure hits (actual geometry, actual heights)
+//   2. HR clearance    — polar radius + height: ball above wall = home run
+//   3. Ground plane    — fast y ≤ 0 check (field calibrated at launch)
+//   4. Accept step     — no collision, advance position
+function updateBall() {
+  if (!simActive) return;
+  const sp = simVel.length();
+  if (sp < 0.001) { simActive = false; return; }
+
+  // Aerodynamic drag
+  const drag = 0.5 * CD * RHO * A_CROSS * sp * sp / MASS;
+
+  // Magnus from batted-ball spin — same CL model as pitch mode, scaled so
+  // 1800 rpm backspin adds ~35 ft of carry (Statcast-realistic, not +85 ft)
+  let mAx = 0, mAy = 0, mAz = 0;
+  if (hitSpinW > 1) {
+    const HIT_SPIN_EFF = 0.45;
+    const S   = hitSpinW * BALL_RADIUS / sp;
+    const CL  = 1 / (2.32 + 0.4 / S);
+    const mag = HIT_SPIN_EFF * CL * RHO * A_CROSS * sp * sp / (2 * MASS);
+    const vhx = simVel.x / sp, vhy = simVel.y / sp, vhz = simVel.z / sp;
+    mAx = mag * (hitSpinHat.y * vhz - hitSpinHat.z * vhy);
+    mAy = mag * (hitSpinHat.z * vhx - hitSpinHat.x * vhz);
+    mAz = mag * (hitSpinHat.x * vhy - hitSpinHat.y * vhx);
+  }
+
+  // Tentative next velocity (Euler integration)
+  const nv = new THREE.Vector3(
+    simVel.x + (-drag * simVel.x / sp + mAx) * simDt,
+    simVel.y + (-GRAVITY - drag * simVel.y / sp + mAy) * simDt,
+    simVel.z + (-drag * simVel.z / sp + mAz) * simDt
+  );
+  // Tentative next position
+  const np = simPos.clone().addScaledVector(nv, simDt);
+
+  const d2    = Math.sqrt(simPos.x*simPos.x + simPos.z*simPos.z);
+  const spray = Math.atan2(simPos.x, -simPos.z) * 180 / Math.PI;
+
+  // ── 1. Mesh collision (outfield walls + infield structure) ──
+  // Run when ball is past infield and below apex (~100 ft) and hasn't cleared fence.
+  if (!clearedFence && d2 > 120 * fieldScale && simPos.y < 100) {
+    const col = checkCollision(simPos, np);
+    if (col) {
+      handleBounce(col);
+      return; // don't advance position — collision already set simPos/simVel
+    }
+  }
+
+  // ── 2. Home run clearance ──
+  // Checked AFTER mesh (so a 10-ft ball can't "clear" a 37-ft Green Monster).
+  // Mesh collision would catch the wall hit first; only reaching here means no hit.
+  if (!clearedFence && Math.abs(spray) <= 47 && d2 > 150 * fieldScale) {
+    const wallR = wallRadiusAtAngle(spray);
+    if (d2 >= wallR && simPos.y > wallHeightAtAngle(spray)) clearedFence = true;
+  }
+
+  // ── 3. Ground plane ──
+  if (np.y <= 0) {
+    np.y = 0;
+    if (rollBounces === 0) {
+      const dist = Math.sqrt(np.x*np.x + np.z*np.z);
+      const la = parseFloat(document.getElementById('launchAngle').value);
+      const sa = parseFloat(document.getElementById('sprayAngle').value);
+      const ev = parseFloat(document.getElementById('exitVelocity').value);
+      lastLand = { x: np.x, z: np.z };
+      setMetrics(dist, simMaxY, simTime, ev, getOutcome(dist, la, sa));
+      landGroup.position.set(np.x, 0, np.z);
+      landGroup.visible = true;
+      ballGlow.visible  = false;
+    }
+    if (rollBounces < 2 && Math.abs(nv.y) > 8) {
+      simVel.set(nv.x * BOUNCE_DAMP_H, -BOUNCE_COR * nv.y, nv.z * BOUNCE_DAMP_H);
+      simPos.set(np.x, BALL_RADIUS, np.z);
+      rollBounces++;
+      return;
+    } else {
+      simVel.set(nv.x, 0, nv.z);
+      simPos.set(np.x, 0, np.z);
+      simActive = false; simRolling = true;
+      ballShadow.visible = false;
+      return;
+    }
+  }
+
+  // ── 4. Accept step ──
+  simVel.copy(nv);
+  simPos.copy(np);
+  simTime += simDt;
+  if (simPos.y > simMaxY) simMaxY = simPos.y;
+
+  trailPush(simPos.x, simPos.y, simPos.z);
+  tracerPush(simPos.x, simPos.y, simPos.z);
+  ball.position.copy(simPos);
+  ballGlow.position.copy(simPos);
+  ballShadow.position.set(simPos.x, 0.07, simPos.z);
+
+  // Foul territory indicator in HUD
+  const isFoul = Math.abs(spray) > 45 && d2 > 60;
+  document.getElementById('hud').textContent =
+    (isFoul ? '⚠ FOUL  ' : '') +
+    'Ball  X:'+simPos.x.toFixed(1)+'  Y:'+simPos.y.toFixed(1)+
+    '  Z:'+simPos.z.toFixed(1)+'  Dist:'+d2.toFixed(0)+' ft';
+}
+
+// ── PITCH PHYSICS ─────────────────────────────────────────────────────────────
+let pitchActive = false;
+let appMode     = 'hit';
+const pitchPos  = new THREE.Vector3();
+const pitchVel  = new THREE.Vector3();
+let pitchTime   = 0;
+let pitchSpinAX = 0, pitchSpinAY = 0; // spin axis XY components (Z=0, perp to velocity)
+let pitchOmega  = 0; // effective spin rad/s for Magnus
+let pitchNoSpinX = 0, pitchNoSpinY = 0; // no-spin reference at plate crossing
+
+function tiltToClock(deg) {
+  const d = ((deg % 360) + 360) % 360;
+  const h = Math.floor(d / 30) % 12;
+  const m = Math.round((d % 30) / 30 * 60);
+  return (h === 0 ? 12 : h) + ':' + String(m).padStart(2, '0');
+}
+
+// Quick no-spin Euler integration to find where ball crosses z=0
+function computeNoSpin(px,py,pz,vx,vy,vz) {
+  let t=0;
+  while (pz < 0 && py > 0 && t < 2.5) {
+    const sp = Math.sqrt(vx*vx+vy*vy+vz*vz);
+    const d  = 0.5*CD*RHO*A_CROSS*sp*sp/MASS;
+    vx += (-d*vx/sp)*simDt; vy += (-GRAVITY-d*vy/sp)*simDt; vz += (-d*vz/sp)*simDt;
+    px += vx*simDt; py += vy*simDt; pz += vz*simDt; t += simDt;
+  }
+  return { x:px, y:py };
+}
+
+function launchPitch() {
+  simActive = false;
+  const velo  = parseFloat(document.getElementById('pitchVelo').value);
+  const spin  = parseFloat(document.getElementById('pitchSpin').value);
+  const tiltD = parseFloat(document.getElementById('pitchTilt').value);
+  const gyroP = parseFloat(document.getElementById('pitchGyro').value);
+  const relH  = parseFloat(document.getElementById('relHeight').value);
+  const relS  = parseFloat(document.getElementById('relSide').value);
+  const ext   = parseFloat(document.getElementById('relExt').value);
+  const vAngD = parseFloat(document.getElementById('pitchVAngle').value);
+  const hAngD = parseFloat(document.getElementById('pitchHAngle').value);
+
+  const speed = velo * 5280/3600;
+  const vAngR = THREE.MathUtils.degToRad(vAngD);
+  const hAngR = THREE.MathUtils.degToRad(hAngD);
+  const tiltR = THREE.MathUtils.degToRad(tiltD);
+
+  // Release position (pitcher side is -Z, ball travels +Z toward plate)
+  // Released from the drawn rubber, which scales with the field (60.5 ft × k)
+  const px0 = relS;
+  const py0 = relH;
+  const pz0 = -(60.5 * fieldScale - ext);
+
+  // Velocity: +Z toward plate, small -Y downward, small X from horizontal angle
+  const vH  = speed * Math.cos(vAngR);
+  const vx0 = vH  * Math.sin(hAngR);
+  const vy0 = speed * Math.sin(vAngR);
+  const vz0 = vH  * Math.cos(hAngR);
+
+  // Spin axis: ω̂ = (-cos(tilt), -sin(tilt), 0) so that:
+  //   tilt=0° (12:00, backspin) → ω̂=(-1,0,0) → Magnus=(0,+1,0) upward ✓
+  //   tilt=180° (6:00, topspin) → ω̂=(+1,0,0) → Magnus=(0,-1,0) down ✓
+  //   tilt=90° (3:00, cw glove) → ω̂=(0,-1,0) → Magnus=(-1,0,0) ✓
+  pitchSpinAX = -Math.cos(tiltR);
+  pitchSpinAY = -Math.sin(tiltR);
+  pitchOmega  = (spin * 2 * Math.PI / 60) * (1 - gyroP/100);
+
+  pitchPos.set(px0, py0, pz0);
+  pitchVel.set(vx0, vy0, vz0);
+  pitchTime = 0;
+  pitchActive = true;
+
+  // No-spin reference for break computation
+  const ns = computeNoSpin(px0, py0, pz0, vx0, vy0, vz0);
+  pitchNoSpinX = ns.x;
+  pitchNoSpinY = ns.y;
+
+  trailReset(); tracerReset();
+  trailLine.material.color.set(0x38bdf8);
+  trailGlowMat.color.set(0x88ddff);
+  tracerMat.color.set(0x44ddff);
+  ball.visible = true; ballGlow.visible = true; ballShadow.visible = true;
+  landGroup.visible = false;
+  document.getElementById('hud').textContent = 'Pitch in flight…';
+}
+
+function stepPitchPhysics() {
+  if (!pitchActive) return;
+  const sp = pitchVel.length();
+  if (sp < 0.1) { pitchActive=false; return; }
+
+  // Drag
+  const drag = 0.5*CD*RHO*A_CROSS*sp*sp/MASS;
+
+  // Magnus: CL via spin parameter S = ω_eff * r / v
+  const S  = (pitchOmega * BALL_RADIUS) / sp;
+  const CL = S > 0.001 ? 1/(2.32 + 0.4/S) : 0;
+  const magnusAcc = CL*RHO*A_CROSS*sp*sp/(2*MASS);
+
+  // Cross product: spinAxis × vHat  (spinAxis.z=0)
+  const vhx = pitchVel.x/sp, vhy = pitchVel.y/sp, vhz = pitchVel.z/sp;
+  const cx =  pitchSpinAY*vhz;              // ay*vz - 0*vy
+  const cy = -pitchSpinAX*vhz;             // 0*vx  - ax*vz
+  const cz =  pitchSpinAX*vhy - pitchSpinAY*vhx;
+
+  pitchVel.x += (-drag*vhx + magnusAcc*cx)*simDt;
+  pitchVel.y += (-GRAVITY - drag*vhy + magnusAcc*cy)*simDt;
+  pitchVel.z += (-drag*vhz + magnusAcc*cz)*simDt;
+  pitchPos.addScaledVector(pitchVel, simDt);
+  pitchTime += simDt;
+
+  trailPush(pitchPos.x, pitchPos.y, pitchPos.z);
+  ball.position.copy(pitchPos);
+  ballGlow.position.copy(pitchPos);
+  ballShadow.position.set(pitchPos.x, 0.07, pitchPos.z);
+
+  const spMph = (pitchVel.length()*3600/5280).toFixed(1);
+  document.getElementById('hud').textContent =
+    'Pitch  Y:'+pitchPos.y.toFixed(2)+' ft  X:'+pitchPos.x.toFixed(2)+' ft  '+spMph+' mph';
+
+  // Detect plate crossing (z transitions from < 0 to >= 0)
+  if (pitchPos.z >= 0 || pitchPos.y < -1) {
+    pitchActive = false;
+    ballGlow.visible = false;
+
+    const pH = pitchPos.y;
+    const pX = pitchPos.x;
+    const hbreak = (pX - pitchNoSpinX) * 12;
+    const ivb    = (pH - pitchNoSpinY) * 12;
+    const vaa    = THREE.MathUtils.radToDeg(Math.atan2(pitchVel.y, pitchVel.z));
+    const pVelo  = (pitchVel.length()*3600/5280);
+
+    const inH = pH >= zoneBot && pH <= zoneTop; // player-height-scaled zone
+    const inX = Math.abs(pX) <= SZ_W/2;
+    const zone = (inH && inX) ? 'STRIKE' : 'BALL';
+
+    document.getElementById('pm_height').textContent = pH.toFixed(2);
+    document.getElementById('pm_side').textContent   = (pX*12).toFixed(1);
+    document.getElementById('pm_hbreak').textContent = hbreak.toFixed(1);
+    document.getElementById('pm_ivb').textContent    = ivb.toFixed(1);
+    document.getElementById('pm_vaa').textContent    = vaa.toFixed(1);
+    document.getElementById('pm_velo').textContent   = pVelo.toFixed(1);
+    document.getElementById('pm_time').textContent   = pitchTime.toFixed(3);
+    const zEl = document.getElementById('pm_zone');
+    zEl.textContent = zone;
+    zEl.className = 'metric-val ' + (zone==='STRIKE' ? 'outcome-2b' : 'outcome-out');
+
+    landGroup.position.set(pX, Math.max(pH, 0), 0);
+    landGroup.visible = true;
+    document.getElementById('hud').textContent =
+      zone+' · Ht:'+pH.toFixed(2)+' ft · Side:'+(pX*12).toFixed(1)+
+      '" · iVB:'+ivb.toFixed(1)+'" · HB:'+hbreak.toFixed(1)+'"';
+  }
+}
+
+function setMode(mode) {
+  appMode = mode;
+  document.getElementById('hitSection').style.display   = mode==='hit'   ? '' : 'none';
+  document.getElementById('pitchSection').style.display = mode==='pitch' ? '' : 'none';
+  document.getElementById('hitMetrics').style.display   = mode==='hit'   ? '' : 'none';
+  document.getElementById('pitchMetrics').style.display = mode==='pitch' ? '' : 'none';
+  document.getElementById('modHit').classList.toggle('active',   mode==='hit');
+  document.getElementById('modPitch').classList.toggle('active', mode==='pitch');
+  document.getElementById('launchBtn').textContent = mode==='hit' ? 'Launch Ball' : 'Throw Pitch';
+  trailReset(); tracerReset();
+  landGroup.visible = false;
+  ball.visible = false; ballGlow.visible = false; ballShadow.visible = false;
+  if (mode==='pitch') {
+    trailLine.material.color.set(0x38bdf8);
+    trailGlowMat.color.set(0x88ddff);
+    tracerMat.color.set(0x44ddff);
+    flyTo('batter');
+  } else {
+    trailLine.material.color.set(0xff7700);
+    trailGlowMat.color.set(0xffcc44);
+    tracerMat.color.set(0xffee22);
+  }
+}
+
+// ── CAMERA VIEWS ─────────────────────────────────────────────────────────────
+const VIEWS = {
+  batter:    { pos:[   0,  6,  22], tgt:[  0,  5, -80] },
+  press:     { pos:[   0,185, 300], tgt:[  0,  0, -60] },
+  cf:        { pos:[   0, 18,-430], tgt:[  0,  5,   0] },
+  overhead:  { pos:[   0,520,   0], tgt:[  0,  0,-200] },
+  firstbase: { pos:[ 130, 30, -30], tgt:[  0,  8,-180] },
+  thirdbase: { pos:[-130, 30, -30], tgt:[  0,  8,-180] },
+  lf:        { pos:[-300, 25,-300], tgt:[  0,  5,   0] },
+  rf:        { pos:[ 260, 25,-230], tgt:[  0,  5,   0] },
+};
+
+let flyTarget = null;
+
+function flyTo(key) {
+  const v = VIEWS[key]; if(!v) return;
+  // Views stay at full-size vantage points: the scaled stadium always sits
+  // inside the MLB envelope, so these positions never clip into geometry.
+  flyTarget = { pos: new THREE.Vector3(...v.pos), tgt: new THREE.Vector3(...v.tgt) };
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.querySelector('.view-btn[data-view="'+key+'"]');
+  if (btn) btn.classList.add('active');
+}
+
+// ── RENDER LOOP ───────────────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+let physAcc = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+
+  if (simActive || pitchActive) {
+    physAcc += dt;
+    while (physAcc >= simDt) {
+      if (simActive)   updateBall();      // mesh-collision physics (replaces stepPhysics)
+      if (pitchActive) stepPitchPhysics();
+      physAcc -= simDt;
+      if (!simActive && !pitchActive) { physAcc=0; break; }
+    }
+  }
+  if (simRolling) stepRolling(dt);
+  // Fly-to camera
+  if (flyTarget) {
+    camera.position.lerp(flyTarget.pos, 0.07);
+    controls.target.lerp(flyTarget.tgt, 0.07);
+    if (camera.position.distanceTo(flyTarget.pos) < 1.5) flyTarget = null;
+  }
+
+  originRingMesh.material.opacity = 0.25 + 0.2*Math.sin(Date.now()*0.003);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ── RESIZE ────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = W()/H();
+  camera.updateProjectionMatrix();
+  renderer.setSize(W(), H());
+  trailMat.resolution.set(W(), H());
+  trailGlowMat.resolution.set(W(), H());
+});
+
+// ── UI WIRING ─────────────────────────────────────────────────────────────────
+document.getElementById('exitVelocity').addEventListener('input', e => document.getElementById('evVal').textContent = e.target.value);
+document.getElementById('launchAngle') .addEventListener('input', e => document.getElementById('laVal').textContent = e.target.value);
+document.getElementById('sprayAngle')  .addEventListener('input', e => document.getElementById('saVal').textContent = e.target.value);
+document.getElementById('backspin')    .addEventListener('input', e => document.getElementById('bsVal').textContent = e.target.value);
+document.getElementById('sidespin')    .addEventListener('input', e => document.getElementById('ssVal').textContent = e.target.value);
+document.getElementById('glChartSel')  .addEventListener('change', renderChart);
+renderChart(); // initial empty-state draw
+document.getElementById('launchBtn')   .addEventListener('click', () => appMode==='hit' ? launch() : launchPitch());
+
+// Mode toggle
+document.getElementById('modHit')  .addEventListener('click', () => setMode('hit'));
+document.getElementById('modPitch').addEventListener('click', () => setMode('pitch'));
+
+// Pitch sliders
+document.getElementById('pitchVelo') .addEventListener('input', e => document.getElementById('pitchVeloVal').textContent = e.target.value);
+document.getElementById('pitchSpin') .addEventListener('input', e => document.getElementById('pitchSpinVal').textContent = e.target.value);
+document.getElementById('pitchTilt') .addEventListener('input', e => document.getElementById('pitchTiltDisp').textContent = tiltToClock(+e.target.value));
+document.getElementById('pitchGyro') .addEventListener('input', e => document.getElementById('pitchGyroVal').textContent = e.target.value);
+document.getElementById('pitchVAngle').addEventListener('input', e => document.getElementById('pitchVAngleVal').textContent = (+e.target.value).toFixed(1));
+document.getElementById('pitchHAngle').addEventListener('input', e => document.getElementById('pitchHAngleVal').textContent = (+e.target.value).toFixed(1));
+
+// Pitch type preset
+document.getElementById('pitchType').addEventListener('change', function() {
+  const p = PITCH_PRESETS[this.value]; if (!p) return;
+  document.getElementById('pitchVelo').value   = p.velo;  document.getElementById('pitchVeloVal').textContent  = p.velo;
+  document.getElementById('pitchSpin').value   = p.spin;  document.getElementById('pitchSpinVal').textContent  = p.spin;
+  document.getElementById('pitchTilt').value   = p.tilt;  document.getElementById('pitchTiltDisp').textContent = tiltToClock(p.tilt);
+  document.getElementById('pitchGyro').value   = p.gyro;  document.getElementById('pitchGyroVal').textContent  = p.gyro;
+  document.getElementById('relHeight').value   = p.relH;
+  document.getElementById('relSide').value     = p.relS;
+  document.getElementById('relExt').value      = p.ext;
+  document.getElementById('pitchVAngle').value = p.vAng;  document.getElementById('pitchVAngleVal').textContent = p.vAng.toFixed(1);
+  document.getElementById('pitchHAngle').value = p.hAng;  document.getElementById('pitchHAngleVal').textContent = p.hAng.toFixed(1);
+});
+document.getElementById('applyCalBtn')      .addEventListener('click', applyCalibration);
+document.getElementById('saveHomePlateBtn') .addEventListener('click', saveHomePlate);
+document.getElementById('resetCalBtn')      .addEventListener('click', resetCalibration);
+document.getElementById('stadiumSelect').addEventListener('change', e => switchStadium(e.target.value));
+document.getElementById('fieldScaleSel').value = fieldScaleKey;
+document.getElementById('fieldScaleSel').addEventListener('change', e => applyFieldScale(e.target.value));
+applyFieldScale(fieldScaleKey); // sync diamond + chip before the first stadium loads
+document.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', () => flyTo(btn.dataset.view)));
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+initSessionUI();
+updateGameStateUI();
+animate();
+preloadAll();
+</script>
+</body>
+</html>

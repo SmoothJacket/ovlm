@@ -20,7 +20,10 @@ import type { BallMeasurement } from '@/types/tracking';
 
 const URL_KEY     = 'ovlm_sim_url';
 const AUTO_KEY    = 'ovlm_sim_autosend';
-const DEFAULT_URL = 'http://localhost:8080/baseball_simulator.html';
+// The sim ships in public/ and is served same-origin by Vite — no separate
+// server. Migrate the stale pre-vendoring default; leave custom URLs alone.
+const DEFAULT_URL = '/baseball_simulator.html';
+const LEGACY_URL  = 'http://localhost:8080/baseball_simulator.html';
 
 export interface SimHitPayload {
   type: 'ovlm:hit';
@@ -42,7 +45,9 @@ let embedReady = false;
 const embedQueue: SimHitPayload[] = [];
 
 export function getSimulatorUrl(): string {
-  return localStorage.getItem(URL_KEY) ?? DEFAULT_URL;
+  const saved = localStorage.getItem(URL_KEY);
+  if (saved == null || saved === LEGACY_URL) return DEFAULT_URL;
+  return saved;
 }
 export function setSimulatorUrl(url: string): void {
   localStorage.setItem(URL_KEY, url);
