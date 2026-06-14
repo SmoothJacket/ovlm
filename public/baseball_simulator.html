@@ -2185,14 +2185,10 @@ function saveHomePlate() {
 function resetCalibration() {
   if (!activeFilename) return;
   clearHomePlateOffset(activeFilename);
-  // Reset to the tuned per-stadium default (DEFAULT_CALIBRATIONS), NOT the
-  // model's raw 0,0,0 origin — that origin is far off home plate for most
-  // parks (e.g. Fenway x=-148.6 ft).
-  const def = DEFAULT_CALIBRATIONS[activeFilename] || { x: 0, y: 0, z: 0 };
-  document.getElementById('offX').value = def.x;
-  document.getElementById('offY').value = def.y;
-  document.getElementById('offZ').value = def.z;
-  applyModelPosition(activeFilename, def.x, def.y, def.z, MODEL_SCALE);
+  document.getElementById('offX').value = 0;
+  document.getElementById('offY').value = 0;
+  document.getElementById('offZ').value = 0;
+  applyModelPosition(activeFilename, 0, 0, 0, MODEL_SCALE);
   buildCollisionMeshes();
   autoLevelField(activeFilename);
   buildWallOverlay(activeFilename);
