@@ -2140,6 +2140,7 @@ function switchStadium(filename) {
   buildWallOverlay(filename); // after collision meshes — traces the fence from the model
   buildCrowd(filename);       // fans on the (now leveled) seating surfaces
   buildCity(filename);        // skyline ring sized from the leveled model footprint
+  placeDefense(filename);     // station the home team's nine on the field
 
   const t = TEAM_COLORS[filename];
   const saved_str = (saved.x || saved.y || saved.z)
@@ -2206,6 +2207,7 @@ function applyFieldScale(key) {
   // Diamond overlay scales with the stadium model, so the drawn chalk lines,
   // base pads, mound and rubber sit exactly on the model's painted infield.
   diamondGroup.scale.setScalar(def.k);
+  defenseGroup.scale.setScalar(def.k);   // fielders shrink/grow with the field too
 
   const chip = document.getElementById('fsChip');
   if (chip) chip.textContent = def.label;
@@ -2497,7 +2499,9 @@ const BANNER_TEXT = {
 function showPlayBanner(code, dist) {
   const b = document.getElementById('playBanner');
   document.getElementById('pbText').textContent = BANNER_TEXT[code] || '';
-  document.getElementById('pbSub').textContent  = Math.round(dist) + ' FEET';
+  // Defensive AI play-by-play replaces the bare distance when available.
+  document.getElementById('pbSub').textContent  =
+    (defenseEnabled && lastPlayDesc) ? lastPlayDesc : Math.round(dist) + ' FEET';
   b.classList.remove('show');
   void b.offsetWidth; // restart the CSS animation
   b.classList.add('show');
@@ -3199,15 +3203,435 @@ function wallRadiusAtAngle(sprayDeg) {
   return bestT;
 }
 
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║ DEFENSIVE AI AGENTS                                                        ║
+// ║ Instead of mapping distance → Single/Double from a static table, each      ║
+// ║ stadium fields its real team's seven position players as autonomous        ║
+// ║ pursuit agents. Each agent has a sprint speed, reaction time, glove reach   ║
+// ║ and range rating; given the ball's true (rendered) trajectory it solves     ║
+// ║ time-to-intercept vs. the ball's arrival to decide catch / field / miss,    ║
+// ║ then the resulting base outcome. Per-stadium environment (grass vs turf,    ║
+// ║ altitude carry, prevailing wind, and the real traced wall) makes the same   ║
+// ║ batted ball play out differently park to park.                              ║
+// ║                                                                             ║
+// ║ Ratings are best-effort 2024-25 reputational estimates (range runs ≈ OAA);  ║
+// ║ they are plain data — edit ROSTER / TEAM_ENV to taste.                      ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+
+// Position → scoreboard fielder number, and straightaway alignment [distFt, sprayDeg]
+const POS_NUM = { LF:7, CF:8, RF:9, '3B':5, SS:6, '2B':4, '1B':3 };
+const ALIGN = {
+  LF:[300,-27], CF:[325,0], RF:[300,27],
+  '3B':[112,-26], SS:[145,-9], '2B':[145,11], '1B':[110,24],
+};
+// Per-position athletic archetype (MLB-average sprint ft/s, reaction s, glove reach ft)
+const ARCH = {
+  LF:{spd:28.6,rt:0.42,reach:6.0}, CF:{spd:29.3,rt:0.40,reach:6.3}, RF:{spd:28.7,rt:0.42,reach:6.0},
+  '3B':{spd:26.6,rt:0.38,reach:5.6}, SS:{spd:27.9,rt:0.36,reach:6.1},
+  '2B':{spd:27.7,rt:0.37,reach:6.0}, '1B':{spd:26.3,rt:0.40,reach:5.6},
+};
+
+// ROSTER[code] = { OF:[[name,rng,arm]×3 = LF,CF,RF], IF:[[name,rng]×4 = 3B,SS,2B,1B] }
+// rng = range runs (OAA-ish, −15..+20). arm 35(weak)..80(cannon), OF only.
+const ROSTER = {
+  ARI:{OF:[['Lourdes Gurriel',-3,52],['Alek Thomas',9,55],['Corbin Carroll',8,68]], IF:[['Eugenio Suárez',-2],['Geraldo Perdomo',6],['Ketel Marte',-3],['Christian Walker',12]]},
+  ATL:{OF:[['Jarred Kelenic',2,60],['Michael Harris II',15,70],['Ronald Acuña Jr.',4,75]], IF:[['Austin Riley',3],['Orlando Arcia',1],['Ozzie Albies',5],['Matt Olson',6]]},
+  BAL:{OF:[['Austin Hays',-1,55],['Cedric Mullins',10,58],['Anthony Santander',-4,52]], IF:[['Jordan Westburg',4],['Gunnar Henderson',8],['Jackson Holliday',2],['Ryan Mountcastle',1]]},
+  BOS:{OF:[['Masataka Yoshida',-6,42],['Jarren Duran',6,55],['Wilyer Abreu',9,72]], IF:[['Rafael Devers',-8],['Trevor Story',7],['Vaughn Grissom',-1],['Triston Casas',3]]},
+  CHC:{OF:[['Ian Happ',6,55],['Cody Bellinger',12,62],['Seiya Suzuki',-2,68]], IF:[['Christopher Morel',-6],['Dansby Swanson',13],['Nico Hoerner',14],['Michael Busch',0]]},
+  CIN:{OF:[['Spencer Steer',-4,50],['TJ Friedl',8,55],['Jake Fraley',1,58]], IF:[['Jeimer Candelario',-1],['Elly De La Cruz',6],['Matt McLain',7],['Christian Encarnacion-Strand',-3]]},
+  CLE:{OF:[['Steven Kwan',13,52],['Tyler Freeman',4,55],['Will Brennan',2,58]], IF:[['José Ramírez',5],['Brayan Rocchio',6],['Andrés Giménez',18],['Josh Naylor',-2]]},
+  COL:{OF:[['Nolan Jones',-3,72],['Brenton Doyle',17,60],['Sean Bouchard',-2,50]], IF:[['Ryan McMahon',9],['Ezequiel Tovar',14],['Brendan Rodgers',3],['Elehuris Montero',-4]]},
+  CWS:{OF:[['Andrew Benintendi',-5,48],['Luis Robert Jr.',11,62],['Gavin Sheets',-6,50]], IF:[['Yoán Moncada',1],['Paul DeJong',4],['Nicky Lopez',5],['Andrew Vaughn',-2]]},
+  DET:{OF:[['Riley Greene',3,58],['Parker Meadows',12,62],['Kerry Carpenter',-3,55]], IF:[['Jace Jung',-2],['Javier Báez',2],['Colt Keith',0],['Spencer Torkelson',2]]},
+  HOU:{OF:[['Yordan Alvarez',-7,48],['Jake Meyers',9,60],['Kyle Tucker',8,70]], IF:[['Alex Bregman',9],['Jeremy Peña',10],['Jose Altuve',-4],['José Abreu',-1]]},
+  KC: {OF:[['MJ Melendez',-4,52],['Kyle Isbel',10,60],['Hunter Renfroe',-3,62]], IF:[['Maikel Garcia',6],['Bobby Witt Jr.',15],['Michael Massey',4],['Vinnie Pasquantino',3]]},
+  LAA:{OF:[['Taylor Ward',-2,55],['Mike Trout',2,65],['Jo Adell',1,68]], IF:[['Anthony Rendon',0],['Zach Neto',9],['Luis Rengifo',3],['Nolan Schanuel',1]]},
+  LAD:{OF:[['Teoscar Hernández',-5,58],['Andy Pages',6,60],['Mookie Betts',7,72]], IF:[['Max Muncy',-2],['Miguel Rojas',8],['Gavin Lux',-1],['Freddie Freeman',5]]},
+  MIA:{OF:[['Bryan De La Cruz',-3,52],['Dane Myers',5,58],['Jesús Sánchez',2,66]], IF:[['Jake Burger',-4],['Otto Lopez',3],['Xavier Edwards',2],['Josh Bell',-3]]},
+  MIL:{OF:[['Christian Yelich',-2,55],['Garrett Mitchell',10,64],['Sal Frelick',11,70]], IF:[['Joey Ortiz',7],['Willy Adames',4],['Brice Turang',12],['Rhys Hoskins',-3]]},
+  MIN:{OF:[['Trevor Larnach',-3,52],['Byron Buxton',13,68],['Max Kepler',2,62]], IF:[['Royce Lewis',1],['Carlos Correa',9],['Edouard Julien',-4],['Carlos Santana',6]]},
+  NYM:{OF:[['Brandon Nimmo',1,55],['Harrison Bader',12,60],['Starling Marte',-2,62]], IF:[['Mark Vientos',-3],['Francisco Lindor',14],['Jeff McNeil',5],['Pete Alonso',0]]},
+  NYY:{OF:[['Alex Verdugo',0,55],['Aaron Judge',3,72],['Juan Soto',-4,66]], IF:[['Jazz Chisholm Jr.',6],['Anthony Volpe',12],['Gleyber Torres',-3],['Anthony Rizzo',4]]},
+  OAK:{OF:[['Brent Rooker',-6,50],['JJ Bleday',7,58],['Lawrence Butler',3,62]], IF:[['Max Schuemann',2],['Jacob Wilson',3],['Zack Gelof',1],['Tyler Soderstrom',-3]]},
+  PHI:{OF:[['Brandon Marsh',6,58],['Johan Rojas',16,62],['Nick Castellanos',-7,55]], IF:[['Alec Bohm',2],['Trea Turner',4],['Bryson Stott',10],['Bryce Harper',3]]},
+  PIT:{OF:[['Bryan Reynolds',-2,55],['Michael A. Taylor',11,60],['Jack Suwinski',4,60]], IF:[['Ke’Bryan Hayes',16],['Oneil Cruz',-2],['Nick Gonzales',2],['Rowdy Tellez',-2]]},
+  SD: {OF:[['Jurickson Profar',1,52],['Jackson Merrill',12,62],['Fernando Tatis Jr.',9,78]], IF:[['Manny Machado',6],['Xander Bogaerts',5],['Jake Cronenworth',6],['Luis Arraez',-5]]},
+  SEA:{OF:[['Randy Arozarena',0,58],['Julio Rodríguez',11,68],['Victor Robles',7,64]], IF:[['Josh Rojas',5],['J.P. Crawford',7],['Jorge Polanco',-2],['Ty France',-1]]},
+  SF: {OF:[['Michael Conforto',-4,55],['Jung Hoo Lee',8,62],['Mike Yastrzemski',5,64]], IF:[['Matt Chapman',17],['Tyler Fitzgerald',3],['Thairo Estrada',6],['LaMonte Wade Jr.',1]]},
+  STL:{OF:[['Brendan Donovan',2,55],['Victor Scott II',12,60],['Jordan Walker',-4,64]], IF:[['Nolan Arenado',13],['Masyn Winn',15],['Nolan Gorman',-3],['Paul Goldschmidt',4]]},
+  TB: {OF:[['Josh Lowe',4,58],['Jose Siri',14,66],['Randy Arozarena',0,58]], IF:[['Junior Caminero',-3],['Taylor Walls',12],['Brandon Lowe',1],['Yandy Díaz',-1]]},
+  TEX:{OF:[['Wyatt Langford',3,58],['Leody Taveras',10,64],['Adolis García',2,76]], IF:[['Josh Jung',3],['Corey Seager',2],['Marcus Semien',7],['Nathaniel Lowe',1]]},
+  TOR:{OF:[['Daulton Varsho',15,60],['Kevin Kiermaier',16,62],['George Springer',-1,62]], IF:[['Ernie Clement',5],['Bo Bichette',-2],['Andrés Giménez',18],['Vladimir Guerrero Jr.',4]]},
+  WSH:{OF:[['James Wood',2,64],['Jacob Young',16,58],['Dylan Crews',6,66]], IF:[['José Tena',1],['CJ Abrams',5],['Luis García Jr.',2],['Nathaniel Lowe',1]]},
+};
+// Fallback when a team code isn't in ROSTER (keeps the sim working for any model)
+const GENERIC_TEAM = {OF:[['Left Fielder',0,55],['Center Fielder',5,58],['Right Fielder',0,58]],
+                      IF:[['Third Base',0],['Shortstop',5],['Second Base',3],['First Base',0]]};
+
+// TEAM_ENV[code] = { surf:'grass'|'turf', carry:airDensityCarryFactor, wind:[ftps_x, ftps_z] }
+// carry>1 = thinner air (more carry, deeper OF reads). wind in field coords (+x→RF, −z→CF).
+const TEAM_ENV = {
+  COL:{surf:'grass',carry:1.10,wind:[0,0]},      // Coors — mile-high, balls carry
+  ARI:{surf:'turf', carry:1.03,wind:[0,0]},      // Chase — turf, dry/warm
+  TB: {surf:'turf', carry:1.00,wind:[0,0]},      // Tropicana — dome turf, dead air
+  TOR:{surf:'turf', carry:1.00,wind:[0,0]},      // Rogers Centre — turf
+  SF: {surf:'grass',carry:0.97,wind:[3,6]},      // Oracle — marine air blowing in from RF
+  CLE:{surf:'grass',carry:0.98,wind:[0,4]},      // Progressive — lake wind in
+  CHC:{surf:'grass',carry:1.01,wind:[-2,-7]},    // Wrigley — wind out to LF (day preset)
+  BOS:{surf:'grass',carry:1.00,wind:[-3,-2]},    // Fenway — swirling out to LF
+  MIA:{surf:'grass',carry:1.00,wind:[0,0]},      // loanDepot — retractable, calm
+  HOU:{surf:'grass',carry:1.00,wind:[0,0]},
+};
+function envFor(code){ return TEAM_ENV[code] || {surf:'grass',carry:1.00,wind:[0,0]}; }
+
+// ── Build the active team's fielder agents (data + meshes) ───────────────────
+const F_GLOVE_H   = 8.0;   // ft — routine reachable catch height
+const F_LEAP_H    = 3.4;   // ft — extra reach on a timed leap (wall robberies)
+const defenseGroup = new THREE.Group();
+scene.add(defenseGroup);
+let fielders = [];          // active agents: {pos,name,num,rng,arm,spd,rt,reach,home,mesh,anim}
+let defenseTeam = null;     // current team code
+let showFielders = true;
+
+function mkFielder(pos, name, rng, arm){
+  const a = ARCH[pos];
+  return {
+    pos, name, num: POS_NUM[pos], rng, arm: arm ?? 55,
+    spd:   a.spd + rng * 0.09,
+    rt:    Math.max(0.27, a.rt - rng * 0.004),
+    reach: a.reach + Math.max(0, rng) * 0.05,
+    home:  ALIGN[pos],          // [distFt, sprayDeg] at MLB scale
+  };
+}
+
+function teamCodeFromFile(filename){
+  return (filename || '').replace('Stadium_','').replace('.glb','');
+}
+
+function buildFielderMesh(color){
+  const g = new THREE.Group();
+  const jersey = new THREE.MeshStandardMaterial({ color, roughness:0.7, metalness:0.05 });
+  const skin   = new THREE.MeshStandardMaterial({ color:0xd8a878, roughness:0.8 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(1.0, 3.0, 4, 8), jersey);
+  body.position.y = 3.0; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8), skin);
+  head.position.y = 5.4; g.add(head);
+  const glove = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6),
+                  new THREE.MeshStandardMaterial({ color:0x5a3b1a, roughness:0.9 }));
+  glove.position.set(1.3, 3.6, 0); g.add(glove);
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(1.6, 16),
+                  new THREE.MeshBasicMaterial({ color:0x000000, transparent:true, opacity:0.28 }));
+  shadow.rotation.x = -Math.PI/2; shadow.position.y = 0.06; g.add(shadow);
+  return g;
+}
+
+// Rebuild the agents + meshes for a stadium's home team
+function placeDefense(filename){
+  const code = teamCodeFromFile(filename);
+  defenseTeam = code;
+  while (defenseGroup.children.length) defenseGroup.remove(defenseGroup.children[0]);
+  fielders = [];
+  const r = ROSTER[code] || GENERIC_TEAM;
+  const tc = TEAM_COLORS[filename];
+  const col = tc ? tc.primary : 0xcccccc;
+  const order = ['LF','CF','RF','3B','SS','2B','1B'];
+  const flat = [ r.OF[0], r.OF[1], r.OF[2], r.IF[0], r.IF[1], r.IF[2], r.IF[3] ];
+  order.forEach((pos, i) => {
+    const [name, rng, arm] = flat[i];
+    const f = mkFielder(pos, name, rng, arm);
+    const mesh = buildFielderMesh(col);
+    const p = polarXZ(f.home[0], f.home[1]);   // local MLB-ft coords; group scales by field
+    mesh.position.set(p.x, 0, p.z);
+    f.mesh = mesh; f.anim = null;
+    defenseGroup.add(mesh);
+    fielders.push(f);
+  });
+  defenseGroup.scale.setScalar(fieldScale);
+  defenseGroup.visible = showFielders;
+  if (window._updateDefTeamLabel) window._updateDefTeamLabel();
+}
+
+function polarXZ(distFt, sprayDeg){
+  const r = sprayDeg * Math.PI / 180;
+  return { x: distFt * Math.sin(r), z: -distFt * Math.cos(r) };
+}
+const _d2 = (ax,az,bx,bz) => Math.hypot(ax-bx, az-bz);
+const _logit = (x,k) => 1 / (1 + Math.exp(-x / k));
+
+// World (scaled) home position of a fielder
+function fielderWorld(f){
+  const p = polarXZ(f.home[0] * fieldScale, f.home[1]);
+  return { x:p.x, z:p.z };
+}
+
+// ── The pursuit solver ───────────────────────────────────────────────────────
+// flight = { samples:[{t,x,y,z}], landing:{x,z}, hang, cleared }
+// Returns { code, primary, target, willCatch, desc }
+function solveDefense(flight, ev, la, sa){
+  const env = envFor(defenseTeam);
+  const fs  = fieldScale;
+  const samples = flight.samples;
+  if (!fielders.length || !samples || samples.length < 2) {
+    return { code: null }; // caller falls back to the statistical model
+  }
+  const windX = env.wind[0] * 1.467, windZ = env.wind[1] * 1.467; // ft/s
+
+  // ── Home-run / wall-robbery path ───────────────────────────────────────────
+  if (flight.cleared) {
+    // find where the ball crosses the wall plane
+    let wc = null;
+    for (const s of samples){
+      const rad = Math.hypot(s.x, s.z);
+      const spray = Math.atan2(s.x, -s.z) * 180/Math.PI;
+      if (Math.abs(spray) <= 47 && rad >= wallRadiusAtAngle(spray)) { wc = { s, spray, rad }; break; }
+    }
+    if (wc) {
+      const topY = wallHeightAtAngle(wc.spray);
+      if (wc.s.y <= topY + F_LEAP_H) {
+        // reachable at the wall — give the nearest OF a robbery attempt
+        const of = [fielders[0],fielders[1],fielders[2]];
+        let best=null;
+        for (const f of of){
+          const w = fielderWorld(f);
+          const d = _d2(w.x,w.z, wc.s.x,wc.s.z);
+          const treq = f.rt + Math.max(0, d - f.reach - 2.0) / f.spd; // +2ft leap reach
+          best = (!best || (wc.s.t - treq) > best.margin) ? { f, margin: wc.s.t - treq } : best;
+        }
+        const robP = Math.min(0.45, 0.04 + Math.max(0,best.f.rng)*0.018) * _logit(best.margin, 0.16);
+        if (Math.random() < robP){
+          return { code: EC.LongFly, primary: best.f,
+                   target: { x: wc.s.x, z: wc.s.z, leap:true }, willCatch:true,
+                   desc: `F${best.f.num} ${shortName(best.f.name)} leaps at the wall — ROBS the home run!` };
+        }
+      }
+    }
+    return { code: EC.HR, primary: null, target: null, willCatch:false,
+             desc: 'Gone — over the fence.' };
+  }
+
+  // ── Find the air catch opportunity (descending below glove height) ──────────
+  let apex = 0;
+  for (let i=1;i<samples.length;i++) if (samples[i].y > samples[apex].y) apex = i;
+  let cp = null;
+  for (let i=apex;i<samples.length;i++){ if (samples[i].y <= F_GLOVE_H){ cp = samples[i]; break; } }
+  if (!cp) cp = samples[samples.length-1];
+  // wind read: defender adjusts to the drifted spot
+  const cpx = cp.x + windX * cp.t * 0.25, cpz = cp.z + windZ * cp.t * 0.25;
+  const cpDepth = Math.hypot(cpx, cpz);
+
+  const isGB = la < 10;
+  if (!isGB){
+    // best pursuer to the catch point
+    let best=null;
+    for (const f of fielders){
+      const w = fielderWorld(f);
+      const d = _d2(w.x,w.z, cpx,cpz);
+      const treq = f.rt + Math.max(0, d - f.reach) / f.spd;
+      const margin = cp.t - treq;
+      if (!best || margin > best.margin) best = { f, margin, d };
+    }
+    // catch probability from timing margin, penalised for screaming liners / dives
+    let p = _logit(best.margin, 0.17);
+    if (la < 18) p *= 0.62;                        // liners are hard to read off the bat
+    if (cp.y < 3 && la < 16) p *= 0.6;             // sinking liner
+    // A scorched low liner with little time to it just drops, unless an elite
+    // ranger is sitting right on it (positive margin).
+    const hotLiner = la < 16 && best.margin < 0.3 && best.f.rng < 10;
+    const errBall = (0.010 + (la<14?0.018:0)) * Math.max(0.3, 1 - best.f.rng*0.02);
+    const inFence = cpDepth <= wallRadiusAtAngle(Math.atan2(cpx,-cpz)*180/Math.PI);
+    const caught = inFence && !hotLiner && (Math.random() < p);
+    if (caught){
+      if (Math.random() < errBall && best.margin < 0.5){
+        return hitResult(EC.Error, best.f, cpx, cpz, cpDepth, env, fs,
+                         `F${best.f.num} ${shortName(best.f.name)} can't hang on — error`);
+      }
+      const code = la>50 ? (cpDepth<150*fs?EC.InfieldFly:EC.ShortFly)
+                 : cpDepth>295*fs ? EC.LongFly : cpDepth>200*fs ? EC.MediumFly : EC.ShortFly;
+      const verb = best.margin > 1.2 ? 'camps under it and makes the catch'
+                 : best.margin > 0.4 ? 'runs it down for the out'
+                 : 'lays out for a diving catch';
+      return { code, primary: best.f, target:{x:cpx,z:cpz}, willCatch:true,
+               desc: `F${best.f.num} ${shortName(best.f.name)} ${verb}.` };
+    }
+    // not caught → falls for a hit; bases from how far it dropped from everyone
+    return hitResult(null, best.f, cpx, cpz, cpDepth, env, fs, null, best.margin);
+  }
+
+  // ── Ground ball: infield interception along the spray ray ───────────────────
+  const land = flight.landing;
+  const dirN = Math.hypot(land.x, land.z) || 1;
+  const ux = land.x/dirN, uz = land.z/dirN;            // outward unit ray
+  const vGround = Math.max(20, ev * 1.467 * 0.72);     // ft/s after contact
+  const turfBoost = env.surf === 'turf' ? 1.08 : 1.0;
+  let fielded=null;
+  for (const f of ['3B','SS','2B','1B'].map(p => fielders.find(x=>x.pos===p))){
+    const w = fielderWorld(f);
+    const along = w.x*ux + w.z*uz;                      // projection onto ray
+    if (along < 20) continue;
+    const perp = Math.abs(w.x*uz - w.z*ux);             // lateral offset from ray
+    const tBall = along / (vGround*turfBoost);
+    const treq  = f.rt + Math.max(0, perp - f.reach) / f.spd;
+    if (treq <= tBall + 0.12){
+      if (!fielded || perp < fielded.perp) fielded = { f, perp, along };
+    }
+  }
+  if (fielded){
+    const errGB = (env.surf==='turf'?0.018:0.030) * Math.max(0.3, 1 - fielded.f.rng*0.02)
+                 * (ev>100?1.5:1);
+    if (Math.random() < errGB)
+      return { code: EC.Error, primary: fielded.f, target:{x:land.x,z:land.z}, willCatch:false,
+               desc: `F${fielded.f.num} ${shortName(fielded.f.name)} boots it — error.` };
+    // routine out; double play if scorched right at the middle infield
+    const dp = (la<2 && ev>92 && (fielded.f.pos==='SS'||fielded.f.pos==='2B') && Math.random()<0.35);
+    return { code: dp?EC.GIDP:EC.Grounder, primary: fielded.f, target:{x:land.x,z:land.z}, willCatch:false,
+             desc: `F${fielded.f.num} ${shortName(fielded.f.name)} ${dp?'turns two':'throws him out'}.` };
+  }
+  // through the infield
+  return hitResult(null, null, land.x, land.z, Math.hypot(land.x,land.z), env, fs, null, -0.5, true);
+}
+
+// Map a non-out ball into a base hit, weighing depth, nearest fielder, arm, turf
+function hitResult(forceCode, nearF, x, z, depth, env, fs, desc, margin, isGrounder){
+  if (forceCode === EC.Error)
+    return { code: EC.Error, primary: nearF, target:{x,z}, willCatch:false, desc };
+
+  // distance from the closest fielder to where the ball settles
+  let minD = 1e9, near = nearF;
+  for (const f of fielders){
+    const w = fielderWorld(f);
+    const d = _d2(w.x,w.z, x,z);
+    if (d < minD){ minD = d; near = f; }
+  }
+  const spray = Math.atan2(x, -z) * 180/Math.PI;
+  const corner = Math.abs(spray) > 30 ? 1 : 0;
+  const arm = near && near.arm ? near.arm : 55;
+  const turf = env.surf === 'turf' ? 1 : 0;
+
+  let code;
+  if (isGrounder){
+    code = (corner && env.surf==='grass' && Math.random()<0.25) ? EC.ShortDouble
+         : depth < 140*fs ? EC.ShortSingle : EC.MediumSingle;
+  } else if (depth < 170*fs){
+    code = EC.ShortSingle;
+  } else {
+    // minD = how far the ball settled from the nearest fielder's post. A ball
+    // that splits the gap (no one close) is a stand-up double; one a fielder can
+    // cut off stays a single. Turf and weak arms add bases; cannons cut them off.
+    const score = Math.max(0,-margin)*1.1 + (minD/34) + turf*0.6 + corner*0.8 - (arm-55)*0.014;
+    if (depth > 330*fs && (corner||minD>120) && arm < 62 && score > 2.4 && Math.random() < 0.5){
+      code = EC.Triple;
+    } else if (minD > 95 || score > 1.6){
+      code = depth > 300*fs ? EC.LongDouble : EC.ShortDouble;
+    } else {
+      code = depth > 250*fs ? EC.LongSingle : EC.MediumSingle;
+    }
+  }
+  const meta = EC_META[code];
+  const who = near ? ('F'+near.num+' '+shortName(near.name)) : '';
+  const isXBH = code===EC.Triple || code===EC.LongDouble || code===EC.ShortDouble;
+  const phrase = code===EC.Triple ? `Off the wall past ${who}`
+               : isXBH ? (corner ? `Lined down the line past ${who}` : `Splits the gap past ${who}`)
+               : isGrounder ? `Sneaks through the infield past ${who}`
+               : minD > 95 ? `Bloops in behind the infield`
+               : `Drops in front of ${who}`;
+  return { code, primary: near, target:{x,z}, willCatch:false,
+           desc: desc || `${phrase} — ${meta.label.toLowerCase()}.` };
+}
+
+function shortName(n){
+  const parts = n.split(' ');
+  return parts.length>1 ? parts[0][0]+'. '+parts.slice(1).join(' ') : n;
+}
+
+// Kick off the pursuer's run animation, synced to the ball's hang time
+function startDefenseAnim(res, hang){
+  fielders.forEach(f => f.anim = null);
+  if (!res || !res.primary || !res.target) return;
+  const f = res.primary;
+  const w = fielderWorld(f);
+  f.anim = {
+    fromX: w.x/fieldScale, fromZ: w.z/fieldScale,   // local (group) coords
+    toX:   res.target.x/fieldScale, toZ: res.target.z/fieldScale,
+    leap:  !!res.target.leap, t0: performance.now(), dur: Math.max(0.35, hang)*1000,
+  };
+}
+function stepDefenseAnim(){
+  for (const f of fielders){
+    if (!f.anim) continue;
+    const a = f.anim;
+    const u = Math.min(1, (performance.now() - a.t0) / a.dur);
+    const e = u<1 ? u : 1;
+    f.mesh.position.x = a.fromX + (a.toX - a.fromX) * e;
+    f.mesh.position.z = a.fromZ + (a.toZ - a.fromZ) * e;
+    f.mesh.position.y = a.leap ? Math.sin(Math.min(1,u)*Math.PI) * 2.2 : 0;
+    if (u >= 1 && !a.hold){ a.hold = performance.now(); }
+    if (a.hold && performance.now() - a.hold > 1400){
+      // ease back toward home
+      const p = polarXZ(f.home[0], f.home[1]);
+      f.mesh.position.x += (p.x - f.mesh.position.x)*0.06;
+      f.mesh.position.z += (p.z - f.mesh.position.z)*0.06;
+      f.mesh.position.y += (0 - f.mesh.position.y)*0.2;
+      if (_d2(f.mesh.position.x,f.mesh.position.z,p.x,p.z) < 1) f.anim = null;
+    }
+  }
+}
+
+let defenseEnabled = true;
+let pendingDefense  = null;   // result computed at launch, consumed at landing
+
+// Forward-integrate the batted ball from the SAME initial state launch() set
+// (simPos/simVel/hitSpinHat/hitSpinW), mirroring updateBall's drag+Magnus model
+// minus mesh collisions, so the agents can read the trajectory the instant the
+// ball is struck and start running in sync with the real flight.
+function predictFlight(){
+  const p = simPos.clone(), v = simVel.clone();
+  const hx=hitSpinHat.x, hy=hitSpinHat.y, hz=hitSpinHat.z, w=hitSpinW;
+  const samples = [{ t:0, x:p.x, y:p.y, z:p.z }];
+  let t = 0, cleared = false;
+  while (t < 12){
+    const sp = v.length(); if (sp < 0.001) break;
+    const drag = 0.5*CD*RHO*A_CROSS*sp*sp/MASS;
+    let mAx=0,mAy=0,mAz=0;
+    if (w > 1){
+      const S = w*BALL_RADIUS/sp, CL = 1/(2.32 + 0.4/S);
+      const mag = 0.45*CL*RHO*A_CROSS*sp*sp/(2*MASS);
+      const vhx=v.x/sp, vhy=v.y/sp, vhz=v.z/sp;
+      mAx=mag*(hy*vhz-hz*vhy); mAy=mag*(hz*vhx-hx*vhz); mAz=mag*(hx*vhy-hy*vhx);
+    }
+    v.x += (-drag*v.x/sp + mAx)*simDt;
+    v.y += (-GRAVITY - drag*v.y/sp + mAy)*simDt;
+    v.z += (-drag*v.z/sp + mAz)*simDt;
+    p.x += v.x*simDt; p.y += v.y*simDt; p.z += v.z*simDt; t += simDt;
+    const rad = Math.hypot(p.x,p.z), spray = Math.atan2(p.x,-p.z)*180/Math.PI;
+    if (!cleared && Math.abs(spray)<=47 && rad > 150*fieldScale &&
+        rad >= wallRadiusAtAngle(spray) && p.y > wallHeightAtAngle(spray)) cleared = true;
+    if (p.y <= 0){ samples.push({ t, x:p.x, y:0, z:p.z }); break; }
+    samples.push({ t, x:p.x, y:p.y, z:p.z });
+  }
+  const last = samples[samples.length-1];
+  return { samples, landing:{ x:last.x, z:last.z }, hang:last.t, cleared };
+}
+
 function getOutcome(dist, la, sa) {
   const ev = parseFloat(document.getElementById('exitVelocity').value);
   const m  = xStats(ev, la, sa || 0);
-  let code;
-  if (clearedFence) {
+  let code, desc = null;
+
+  // ── Defensive AI path ───────────────────────────────────────────────────────
+  // pendingDefense was solved at launch (synced to the fielder animation).
+  // Reconcile it with the REAL flight's fence result, which the physics — not
+  // the agents — decided, so a predicted HR that actually banged the wall, or a
+  // wall-scraper that actually left, lands on the right outcome.
+  if (defenseEnabled && pendingDefense && pendingDefense.code) {
+    code = pendingDefense.code; desc = pendingDefense.desc;
+    const robbed = pendingDefense.willCatch && pendingDefense.target && pendingDefense.target.leap;
+    if (clearedFence && code !== EC.HR && !robbed)      code = EC.HR;          // ball really left
+    else if (!clearedFence && code === EC.HR)           code = EC.LongDouble;  // off the wall
+  } else if (clearedFence) {
     code = EC.HR; // physically over the fence — always a homer
   } else {
-    // In the park: the HR probability mass becomes wall-ball XBH / long outs
-    // Distance thresholds scale with the field so youth fields classify sanely
+    // Fallback statistical model (defense AI off, or no agents loaded yet).
     const k  = fieldScale;
     const p3 = m.p3 + m.phr * 0.15;
     const p2 = m.p2 + m.phr * 0.55;
@@ -3220,6 +3644,7 @@ function getOutcome(dist, la, sa) {
     else if (la > 25)              code = dist > 295*k ? EC.LongFly : dist > 200*k ? EC.MediumFly : EC.ShortFly;
     else                           code = dist > 250*k ? EC.LongFly : EC.MediumFly; // line out
   }
+  lastPlayDesc = desc;
   const meta = EC_META[code];
   return {
     text: meta.label.split('—')[0].trim(), cls: meta.cls, code,
@@ -3227,6 +3652,7 @@ function getOutcome(dist, la, sa) {
     type: la < 10 ? 'GB' : la < 25 ? 'LD' : la < 50 ? 'FB' : 'PU',
   };
 }
+let lastPlayDesc = null;
 
 function setMetrics(dist, maxH, hang, ev, outcome) {
   document.getElementById('mDist').textContent   = dist  != null ? Math.round(dist)  : '--';
@@ -3287,6 +3713,15 @@ function launch() {
   ball.visible=true; ballGlow.visible=true; ballShadow.visible=true;
   landGroup.visible=false;
   setMetrics(null,null,null,ev,null);
+
+  // Defensive AI: read the just-struck trajectory and send the agents running.
+  if (defenseEnabled && fielders.length){
+    const pf = predictFlight();
+    pendingDefense = solveDefense(pf, ev, la, sa);
+    startDefenseAnim(pendingDefense, pf.hang);
+  } else {
+    pendingDefense = null;
+  }
 }
 
 function stepRolling(dt) {
@@ -3940,6 +4375,7 @@ function animate() {
     }
   }
   if (simRolling) stepRolling(dt);
+  stepDefenseAnim();
   // Fly-to camera
   if (flyTarget) {
     camera.position.lerp(flyTarget.pos, 0.07);
@@ -4004,6 +4440,32 @@ document.getElementById('fieldScaleSel').value = fieldScaleKey;
 document.getElementById('fieldScaleSel').addEventListener('change', e => applyFieldScale(e.target.value));
 applyFieldScale(fieldScaleKey); // sync diamond + chip before the first stadium loads
 document.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', () => flyTo(btn.dataset.view)));
+
+// ── DEFENSIVE AI control panel (injected) ────────────────────────────────────
+(function buildDefenseUI(){
+  const wrap = document.createElement('div');
+  wrap.style.cssText =
+    'position:fixed;left:12px;bottom:12px;z-index:50;background:rgba(10,12,20,0.82);' +
+    'border:1px solid #1e2740;border-radius:8px;padding:8px 10px;font:11px/1.4 system-ui,sans-serif;' +
+    'color:#cdd6e6;backdrop-filter:blur(4px);user-select:none;min-width:140px';
+  wrap.innerHTML =
+    '<div style="font-weight:700;letter-spacing:.08em;color:#7fa8ff;margin-bottom:5px">⚾ DEFENSIVE AI</div>' +
+    '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:3px">' +
+      '<input type="checkbox" id="defEnable" checked> Agent outcomes</label>' +
+    '<label style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
+      '<input type="checkbox" id="defShow" checked> Show fielders</label>' +
+    '<div id="defTeam" style="margin-top:5px;color:#6b7689;font-size:10px"></div>';
+  document.body.appendChild(wrap);
+  document.getElementById('defEnable').addEventListener('change', e => { defenseEnabled = e.target.checked; });
+  document.getElementById('defShow').addEventListener('change', e => {
+    showFielders = e.target.checked; defenseGroup.visible = showFielders;
+  });
+  window._updateDefTeamLabel = () => {
+    const tc = TEAM_COLORS[activeFilename];
+    document.getElementById('defTeam').textContent =
+      defenseTeam ? (tc ? tc.name : defenseTeam) + ' defense' : '';
+  };
+})();
 
 // ── BOOT ─────────────────────────────────────────────────────────────────────
 initSessionUI();
