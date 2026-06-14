@@ -6,20 +6,27 @@ Edit these values to match your hardware setup.
 import cv2
 
 # ── Stereo cameras ────────────────────────────────────────────────────────────
-# Tuned for OV9281-class global-shutter UVC cameras, where frame rate is
-# locked to resolution: 1280×800@120 / 640×400@210 / 320×200@420 / ~160×100@640.
-# The stereo pair runs the 640×400@210 mode — triangulation accuracy is set by
-# pixel resolution, and 210 fps already gives ~40+ points per flight window,
-# so finer pixels beat more frames here.
+# Hardware: QILOVE 800P monochrome global-shutter USB camera (OV9281-class),
+# 5–50 mm CS varifocal lens. Frame rate is locked to resolution; the documented
+# UVC modes are:  1280×800@120 / 640×480@210 / 320×240@420 / 160×120@640.
+# The stereo pair runs 640×480@210 — triangulation accuracy is set by pixel
+# resolution, and 210 fps already gives ~40+ points per flight window, so finer
+# pixels beat more frames here. (For maximum accuracy you can instead use the
+# full 1280×800@120 mode; for maximum temporal density drop to 320×240@420.)
 CAM0_IDX   = 0          # OpenCV camera index for left stereo camera
 CAM1_IDX   = 1          # OpenCV camera index for right stereo camera
 WIDTH      = 640
-HEIGHT     = 400
+HEIGHT     = 480
 FRAMERATE  = 210         # fps, stereo pair — must match a mode the sensor supports
 
 # OpenCV capture backend — CAP_MSMF is the Windows default (Media Foundation).
 # Switch to cv2.CAP_DSHOW if MSMF can't reach the target framerate.
 CAMERA_BACKEND = cv2.CAP_MSMF
+
+# These cameras only deliver their high frame rates over MJPEG (the default
+# YUY2/uncompressed path caps at ~30 fps). The FOURCC must be set BEFORE the
+# resolution/fps or the camera stays in the slow uncompressed mode.
+CAMERA_FOURCC = "MJPG"
 
 # ── Exposure (CRITICAL for ball tracking) ─────────────────────────────────────
 # On Windows, OpenCV sets exposure in log₂ seconds (DirectShow / MSMF convention):
@@ -38,23 +45,22 @@ GAIN_VALUE      = 4      # 0–255 for most DirectShow/MSMF cameras; -1 to skip
 # Dedicated high-speed camera for spin rate / spin axis via seam tracking.
 # Seam tracking is Nyquist-limited to half a rotation per frame, so the
 # measurable ceiling scales with fps: ~9 400 RPM at 420 fps covers any batted
-# ball or pitch. Runs the OV9281's 320×200@420 mode — zoom the 5–50 mm lens
+# ball or pitch. Runs the camera's 320×240@420 mode — zoom the 5–50 mm lens
 # toward the long end and frame the contact zone tight so the ball is ≥20 px
-# across, or the seams won't resolve at this resolution. (The ~160×100@640
-# mode is usually too small for seams; try it only with the ball near
-# frame-filling.)
+# across, or the seams won't resolve at this resolution. (The 160×120@640 mode
+# is usually too small for seams; try it only with the ball near frame-filling.)
 # When disabled (or the camera fails to open), spin estimation falls back to
 # stereo camera 0. Enable here or with: python main.py --spin-cam
 SPIN_CAM_ENABLED        = False
 SPIN_CAM_IDX            = 2
 SPIN_CAM_WIDTH          = 320
-SPIN_CAM_HEIGHT         = 200
+SPIN_CAM_HEIGHT         = 240
 SPIN_CAM_FPS            = 420
 SPIN_CAM_EXPOSURE_VALUE = -12   # ≈0.25 ms — frame interval at 420 fps is 2.4 ms
 SPIN_CAM_GAIN_VALUE     = 8     # shorter exposure needs more gain; -1 to skip
 
 # Ball size bounds for the zoomed spin camera (px). Much larger than the
-# stereo bounds — the lens is framed so the ball dominates the 320×200 frame.
+# stereo bounds — the lens is framed so the ball dominates the 320×240 frame.
 SPIN_BALL_MIN_RADIUS_PX = 10
 SPIN_BALL_MAX_RADIUS_PX = 90
 

@@ -46,6 +46,7 @@ def _open_camera(idx: int, exposure_value: int, gain_value: int) -> cv2.VideoCap
     cap = cv2.VideoCapture(idx, config.CAMERA_BACKEND)
     if not cap.isOpened():
         return None
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  config.WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.HEIGHT)
     cap.set(cv2.CAP_PROP_FPS,          float(config.FRAMERATE))
@@ -71,6 +72,10 @@ def list_cameras() -> None:
     for i in range(10):
         cap = cv2.VideoCapture(i, config.CAMERA_BACKEND)
         if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  config.WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.HEIGHT)
+            cap.set(cv2.CAP_PROP_FPS,          float(config.FRAMERATE))
             w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)

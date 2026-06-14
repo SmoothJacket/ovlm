@@ -246,6 +246,7 @@ def _show_rectification(cal_path: str) -> None:
     cap0 = cv2.VideoCapture(config.CAM0_IDX, config.CAMERA_BACKEND)
     cap1 = cv2.VideoCapture(config.CAM1_IDX, config.CAMERA_BACKEND)
     for cap in (cap0, cap1):
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  img_size[0])
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, img_size[1])
 
@@ -288,6 +289,7 @@ def calibrate_live(target: int, out_path: str) -> None:
     cap0 = cv2.VideoCapture(config.CAM0_IDX, config.CAMERA_BACKEND)
     cap1 = cv2.VideoCapture(config.CAM1_IDX, config.CAMERA_BACKEND)
     for cap in (cap0, cap1):
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  img_size[0])
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, img_size[1])
         cap.set(cv2.CAP_PROP_FPS,          float(config.FRAMERATE))

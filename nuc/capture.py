@@ -51,6 +51,9 @@ def _make_camera(idx: int, width: int, height: int, fps: float,
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open camera index {idx}")
 
+    # MJPEG must be selected BEFORE resolution/fps — these cameras only reach
+    # their high frame rates in MJPEG; the uncompressed default caps at ~30 fps.
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv2.CAP_PROP_FPS,          float(fps))

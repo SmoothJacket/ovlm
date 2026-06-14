@@ -192,6 +192,7 @@ def projection_matrix(K: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray
 
 def _open(idx: int):
     cap = cv2.VideoCapture(idx, config.CAMERA_BACKEND)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  config.WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.HEIGHT)
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
