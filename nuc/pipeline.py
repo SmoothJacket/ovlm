@@ -45,8 +45,9 @@ class TrackingPipeline:
 
         if not self._triangulator.is_calibrated:
             log.warning(
-                "No calibration file found (%s). "
-                "Run calibrate.py first for accurate measurements.",
+                "No calibration file found (%s). Calibrate first for accurate "
+                "measurements: plate_calib.py --live (just needs a home plate in "
+                "view) or calibrate.py --live (ChArUco board).",
                 config.CALIBRATION_FILE,
             )
 

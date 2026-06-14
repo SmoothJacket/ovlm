@@ -4,3 +4,8 @@ websockets
 pyaudio
 pyserial
 psutil
+
+# Optional — only needed to TRAIN or run the learned home-plate keypoint model
+# (plate_calib.py works without it via the classical detector):
+#   pip install torch
+# torch

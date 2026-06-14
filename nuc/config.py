@@ -116,5 +116,33 @@ RADAR_AGREE_FRACTION        = 0.15
 WS_HOST = "0.0.0.0"
 WS_PORT = 8765
 
+# ── Home-plate AI calibration ─────────────────────────────────────────────────
+# Calibrate the stereo rig from a regulation home plate in view — no ChArUco
+# board. A keypoint model (plate_detector.py) finds the plate's 5 corners in
+# both cameras; plate_calib.py runs PnP against the plate's known geometry to
+# recover each camera's pose, hence the stereo extrinsics in metric scale.
+#
+# Regulation plate: 17" front edge, two 8.5" parallel sides, two 12" sides
+# converging to the back point (back-depth = √(12²−8.5²) ≈ 8.47").
+PLATE_FRONT_IN      = 17.0
+PLATE_SIDE_IN       = 8.5
+PLATE_BACK_IN       = 8.47          # √(12²−8.5²); front-edge → mid → point depth
+PLATE_CALIB_FRAMES  = 30            # frames averaged for a stable corner solve
+PLATE_MODEL_FILE    = "plate_keypoints.pt"   # trained weights (optional)
+
+# Intrinsics are derived from the lens + sensor because a single planar view
+# can't recover them reliably. Set these to match your camera/lens; the focal
+# length can optionally be refined from the plate homography (--refine-focal).
+SENSOR_PIXEL_PITCH_UM = 3.0         # OV9281 native pixel size
+SENSOR_NATIVE_WIDTH   = 1280        # native sensor width (modes bin down from this)
+LENS_FOCAL_MM         = 8.0         # set to your 5–50 mm lens's actual focal length
+
+def focal_px(width: int = None) -> float:
+    """Approx focal length in pixels for the current capture width, assuming the
+    sub-1280 modes are 2×2-binned (so effective pixel pitch scales with width)."""
+    w = width if width is not None else WIDTH
+    native_fx = LENS_FOCAL_MM * 1000.0 / SENSOR_PIXEL_PITCH_UM
+    return native_fx * (w / SENSOR_NATIVE_WIDTH)
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CALIBRATION_FILE = "calibration.npz"
