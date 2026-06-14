@@ -4,9 +4,7 @@ import { StatusBar } from './StatusBar';
 import { CalibrationWizard } from '../calibration/CalibrationWizard';
 import { DualVideoPanel } from '../capture/DualVideoPanel';
 import { MetricsDashboard } from '../metrics/MetricsDashboard';
-import { TrajectoryViewer } from '../visualization/TrajectoryViewer';
 import { SimulatorFrame } from '../visualization/SimulatorFrame';
-import { BattingCage } from '../visualization/BattingCage';
 import { SettingsPanel } from '../settings/SettingsPanel';
 
 const NAV_ITEMS = [
@@ -14,13 +12,11 @@ const NAV_ITEMS = [
   { id: 'calibration',   label: 'CALIBRATE',      icon: '⊞' },
   { id: 'metrics',       label: 'METRICS',        icon: '▦' },
   { id: 'visualization', label: '3D VIEW',        icon: '◎' },
-  { id: 'cage',          label: 'CAGE',           icon: '⬡' },
 ] as const;
 
 export function Dashboard(): React.ReactElement {
   const activePanel = useUIPanel();
   const setPanel = useStore((s) => s.setPanel);
-  const viewer3DMode = useStore((s) => s.viewer3DMode);
 
   return (
     <div style={styles.root}>
@@ -68,80 +64,17 @@ export function Dashboard(): React.ReactElement {
           {activePanel === 'capture'       && <DualVideoPanel />}
           {activePanel === 'calibration'   && <CalibrationWizard />}
           {activePanel === 'metrics'       && <MetricsDashboard />}
-          {activePanel === 'visualization' && viewer3DMode === 'ovlm' && <TrajectoryViewer />}
-          {activePanel === 'cage'          && <BattingCage />}
           {activePanel === 'settings'      && <SettingsPanel />}
 
-          {/* Persistent across panel switches — the sim preloads 30 stadiums */}
-          <SimulatorFrame visible={activePanel === 'visualization' && viewer3DMode === 'hittrax'} />
-
-          {activePanel === 'visualization' && <Viewer3DModeToggle />}
+          {/* 3D VIEW is the live-driven HitTrax stadium simulator. Mounted at
+              Dashboard level (not inside the panel conditional) so it survives
+              panel switches — the sim preloads 30 stadiums. */}
+          <SimulatorFrame visible={activePanel === 'visualization'} />
         </div>
       </main>
     </div>
   );
 }
-
-/** Floating pill that switches the 3D VIEW between OVLM's own Three.js scene
- *  and the embedded HitTrax stadium simulator (live-driven by the monitor). */
-function Viewer3DModeToggle(): React.ReactElement {
-  const mode = useStore((s) => s.viewer3DMode);
-  const setMode = useStore((s) => s.setViewer3DMode);
-  return (
-    <div style={toggleStyles.bar}>
-      <button
-        style={{ ...toggleStyles.btn, ...(mode === 'ovlm' ? toggleStyles.btnActive : {}) }}
-        onClick={() => setMode('ovlm')}
-      >
-        ◎ OVLM 3D
-      </button>
-      <button
-        style={{ ...toggleStyles.btn, ...(mode === 'hittrax' ? toggleStyles.btnActiveSim : {}) }}
-        onClick={() => setMode('hittrax')}
-      >
-        ⚾ HITTRAX SIM
-      </button>
-    </div>
-  );
-}
-
-const toggleStyles: Record<string, React.CSSProperties> = {
-  bar: {
-    position: 'absolute',
-    top: 10,
-    left: '50%',
-    transform: 'translateX(-50%)',
-    display: 'flex',
-    gap: 2,
-    background: 'rgba(10,10,20,0.85)',
-    border: '1px solid #1a1a2e',
-    borderRadius: 6,
-    padding: 2,
-    zIndex: 10,
-  },
-  btn: {
-    padding: '5px 14px',
-    background: 'transparent',
-    color: '#556',
-    border: 'none',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '0.1em',
-    fontFamily: 'inherit',
-  },
-  btnActive: {
-    background: '#131326',
-    color: '#4488ff',
-    boxShadow: 'inset 0 0 0 1px #1a2a5e',
-  },
-  btnActiveSim: {
-    background: '#261713',
-    color: '#cc8844',
-    boxShadow: 'inset 0 0 0 1px #5e2a1a',
-  },
-};
 
 const styles: Record<string, React.CSSProperties> = {
   root: {
