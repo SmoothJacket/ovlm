@@ -143,7 +143,7 @@ export function DualVideoPanel(): React.ReactElement {
             <li>In the <code style={styles.code}>nuc\</code> folder run: <code style={styles.code}>python main.py</code></li>
             <li>Enter the monitor's WebSocket URL above (default ws://localhost:8765)</li>
             <li>Click CONNECT — the status dot will turn green</li>
-            <li>Run <code style={styles.code}>python calibrate.py --live</code> if not yet calibrated</li>
+            <li>If not yet calibrated, run <code style={styles.code}>python plate_calib.py --live</code> (see the Calibrate tab)</li>
             <li>Click ARM, then swing</li>
           </ol>
         </div>
