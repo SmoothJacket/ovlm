@@ -4362,7 +4362,10 @@ function flyTo(key) {
 let followBall = false;
 const _followPos = new THREE.Vector3();
 function updateFollowCam() {
-  if (!followBall || !simActive) return false;
+  // Stop at the fence: once the ball clears the wall (home run) release the
+  // camera so it holds at the fence and watches the ball sail out, instead of
+  // chasing it into the empty space beyond the stadium.
+  if (!followBall || !simActive || clearedFence) return false;
   flyTarget = null;                         // follow overrides any pending fly-to
   const bp = ball.position;
   let dx = simVel.x, dz = simVel.z;          // horizontal travel direction
