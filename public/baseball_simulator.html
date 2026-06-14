@@ -419,6 +419,9 @@ input[type=number] { width: 70px; padding: 2px 6px; }
       <button class="view-btn" data-view="lf">LF Corner</button>
       <button class="view-btn" data-view="rf">RF Corner</button>
     </div>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:#9ab;margin-top:2px">
+      <input type="checkbox" id="followBallChk"> Auto-follow ball flight
+    </label>
   </div>
 
   <!-- Hit Metrics -->
@@ -4351,6 +4354,28 @@ function flyTo(key) {
   if (btn) btn.classList.add('active');
 }
 
+// ── Auto-follow camera ────────────────────────────────────────────────────────
+// When enabled, a chase cam trails the airborne ball from behind and above along
+// its travel direction, keeping it framed. It releases at landing (simActive
+// only — not the roll-out) so it tracks the flight, not a long roll past the
+// fence. Returns true while it's driving the camera so the loop skips fly-to.
+let followBall = false;
+const _followPos = new THREE.Vector3();
+function updateFollowCam() {
+  if (!followBall || !simActive) return false;
+  flyTarget = null;                         // follow overrides any pending fly-to
+  const bp = ball.position;
+  let dx = simVel.x, dz = simVel.z;          // horizontal travel direction
+  let dl = Math.hypot(dx, dz);
+  if (dl < 1e-3) { dx = bp.x; dz = bp.z; dl = Math.hypot(dx, dz) || 1; }
+  dx /= dl; dz /= dl;
+  const TRAIL = 80, HEIGHT = 30;             // ft behind / above the ball
+  _followPos.set(bp.x - dx * TRAIL, bp.y + HEIGHT, bp.z - dz * TRAIL);
+  camera.position.lerp(_followPos, 0.12);
+  controls.target.lerp(bp, 0.22);
+  return true;
+}
+
 // ── RENDER LOOP ───────────────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let physAcc = 0;
@@ -4370,8 +4395,8 @@ function animate() {
   }
   if (simRolling) stepRolling(dt);
   stepDefenseAnim();
-  // Fly-to camera
-  if (flyTarget) {
+  // Camera: auto-follow the live ball takes priority over a view fly-to.
+  if (!updateFollowCam() && flyTarget) {
     camera.position.lerp(flyTarget.pos, 0.07);
     controls.target.lerp(flyTarget.tgt, 0.07);
     if (camera.position.distanceTo(flyTarget.pos) < 1.5) flyTarget = null;
@@ -4434,6 +4459,7 @@ document.getElementById('fieldScaleSel').value = fieldScaleKey;
 document.getElementById('fieldScaleSel').addEventListener('change', e => applyFieldScale(e.target.value));
 applyFieldScale(fieldScaleKey); // sync diamond + chip before the first stadium loads
 document.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', () => flyTo(btn.dataset.view)));
+document.getElementById('followBallChk').addEventListener('change', e => { followBall = e.target.checked; });
 
 // ── DEFENSIVE AI control panel (injected) ────────────────────────────────────
 (function buildDefenseUI(){
