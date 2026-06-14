@@ -542,27 +542,24 @@ input[type=number] { width: 70px; padding: 2px 6px; }
     </div>
   </div>
 
-  <!-- Calibration -->
+  <!-- Calibration (locked) -->
   <div class="sec flex flex-col gap-2">
     <div class="row">
       <div class="text-xs text-slate-400 tracking-widest">HOME PLATE CALIBRATION</div>
     </div>
-    <div class="text-slate-600 text-xs">Move model until the pentagon sits at the blue ring, then save.</div>
-    <div class="grid grid-cols-3 gap-2 mt-1">
-      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">X (L/R)</div><input type="number" id="offX" value="0" step="0.5"/></div>
-      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Y (Up)</div><input type="number" id="offY" value="0" step="0.5"/></div>
-      <div class="flex flex-col gap-1"><div class="text-xs text-slate-500">Z (Fwd)</div><input type="number" id="offZ" value="0" step="0.5"/></div>
+    <div class="text-slate-500 text-xs">🔒 Calibration is locked — every field is fixed at 0, 0, 0 and cannot be changed.</div>
+    <!-- Controls retained but hidden + disabled so no calibration change can be made;
+         the element IDs are kept so the rest of the sim's code still resolves them. -->
+    <div style="display:none">
+      <input type="number" id="offX" value="0" step="0.5" disabled/>
+      <input type="number" id="offY" value="0" step="0.5" disabled/>
+      <input type="number" id="offZ" value="0" step="0.5" disabled/>
+      <input type="number" id="modelScale" value="3.28" step="0.01" disabled/>
+      <button id="applyCalBtn" disabled></button>
+      <button id="saveHomePlateBtn" disabled></button>
+      <button id="resetCalBtn" disabled></button>
+      <div id="calInfo"></div>
     </div>
-    <div class="flex flex-col gap-1">
-      <div class="text-xs text-slate-500">Scale</div>
-      <input type="number" id="modelScale" value="3.28" step="0.01" style="width:100%"/>
-    </div>
-    <div class="grid grid-cols-2 gap-1.5">
-      <button id="applyCalBtn" class="cal-btn py-1.5 text-sky-400 border-sky-900">Apply</button>
-      <button id="saveHomePlateBtn" class="cal-btn py-1.5 text-emerald-400 border-emerald-900">Save as 0,0,0</button>
-    </div>
-    <button id="resetCalBtn" class="cal-btn w-full py-1 text-red-400 border-red-900">Reset to Default</button>
-    <div id="calInfo" class="text-slate-600 text-xs leading-relaxed"></div>
   </div>
 
   <!-- Wall dimensions (updated per stadium) -->
@@ -1654,14 +1651,12 @@ function loadHomePlateOffsets() {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch(e) { return {}; }
 }
 function getOffset(filename) {
-  const saved = loadHomePlateOffsets();
-  // User-saved values take priority; fall back to geometry-derived defaults
-  return saved[filename] || DEFAULT_CALIBRATIONS[filename] || { x:0, y:0, z:0 };
+  // Calibration is locked: always use the built-in default and ignore any saved
+  // localStorage overrides, so no calibration change can take effect.
+  return DEFAULT_CALIBRATIONS[filename] || { x:0, y:0, z:0 };
 }
 function saveHomePlateOffset(filename, x, y, z) {
-  const all = loadHomePlateOffsets();
-  all[filename] = { x, y, z };
-  try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch(e) {}
+  /* Calibration locked — saving is disabled. */
 }
 function clearHomePlateOffset(filename) {
   const all = loadHomePlateOffsets();
