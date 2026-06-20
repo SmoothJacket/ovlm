@@ -10,6 +10,7 @@ export function App(): React.ReactElement {
   const ingestMeasurement = useStore((s) => s.ingestPiMeasurement);
   const updateAudioLevel  = useStore((s) => s.updateAudioLevel);
   const updatePiHealth    = useStore((s) => s.updatePiHealth);
+  const updateCalibrationProgress = useStore((s) => s.updateCalibrationProgress);
 
   useEffect(() => {
     piClient.connect(wsHost, {
@@ -17,6 +18,7 @@ export function App(): React.ReactElement {
       ingestPiMeasurement:  ingestMeasurement,
       updateAudioLevel,
       updatePiHealth,
+      updateCalibrationProgress,
     });
     return () => piClient.disconnect();
   }, [wsHost]);

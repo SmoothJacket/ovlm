@@ -5,6 +5,7 @@ Messages sent to clients:
   { "type": "status",      "state": "armed"|"processing"|"idle", ... }
   { "type": "measurement", "exitVelocity": 95.2, "launchAngle": 14.3, ... }
   { "type": "audio_level", "rms": 0.12, "peak": 0.31, "threshold": 0.40 }
+  { "type": "calibration", "state": "collecting"|"done"|"error", ... }
   { "type": "error",       "message": "..." }
 
 Messages received from clients:
@@ -12,6 +13,7 @@ Messages received from clients:
   { "type": "disarm" }
   { "type": "reset" }
   { "type": "set_threshold", "value": 0.28 }
+  { "type": "calibrate" }
 """
 
 import asyncio
@@ -39,13 +41,15 @@ class PipelineServer:
         self._arm_cb    = None
         self._disarm_cb = None
         self._reset_cb  = None
-        self._threshold_cb = None   # called with float when browser sets a new threshold
+        self._threshold_cb  = None   # called with float when browser sets a new threshold
+        self._calibrate_cb  = None
 
-    def set_callbacks(self, arm=None, disarm=None, reset=None, set_threshold=None) -> None:
+    def set_callbacks(self, arm=None, disarm=None, reset=None, set_threshold=None, calibrate=None) -> None:
         self._arm_cb        = arm
         self._disarm_cb     = disarm
         self._reset_cb      = reset
         self._threshold_cb  = set_threshold
+        self._calibrate_cb  = calibrate
 
     async def _handler(self, ws: "WebSocketServerProtocol") -> None:
         self._clients.add(ws)
@@ -66,6 +70,7 @@ class PipelineServer:
                         self._threshold_cb(float(msg["value"]))
                     except (KeyError, ValueError):
                         pass
+                elif t == "calibrate" and self._calibrate_cb:  self._calibrate_cb()
 
         except Exception:
             pass

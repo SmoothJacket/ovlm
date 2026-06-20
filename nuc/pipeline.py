@@ -51,6 +51,12 @@ class TrackingPipeline:
                 config.CALIBRATION_FILE,
             )
 
+    def reload_calibration(self) -> None:
+        """Re-read config.CALIBRATION_FILE — called after a calibration run
+        completes so the new geometry applies without restarting main.py."""
+        self._triangulator = Triangulator()
+        log.info("Calibration reloaded (is_calibrated=%s)", self._triangulator.is_calibrated)
+
     def process(self, frames: List[FramePair], trigger_time: float) -> None:
         t_start = time.monotonic()
         log.info("Processing %d frame pairs …", len(frames))

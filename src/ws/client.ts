@@ -12,6 +12,7 @@ type StoreRef = {
   ingestPiMeasurement: (msg: Extract<PiMessage, { type: 'measurement' }>) => void;
   updateAudioLevel: (level: Extract<PiMessage, { type: 'audio_level' }>) => void;
   updatePiHealth:   (h: Extract<PiMessage, { type: 'health' }>) => void;
+  updateCalibrationProgress: (msg: Extract<PiMessage, { type: 'calibration' }>) => void;
 };
 
 const BACKOFF_CAP_MS = 30_000;
@@ -101,6 +102,9 @@ class PiClient {
         break;
       case 'health':
         this.store.updatePiHealth(msg);
+        break;
+      case 'calibration':
+        this.store.updateCalibrationProgress(msg);
         break;
       case 'error':
         this.store.updatePipelineStatus({ errorMessage: msg.message });

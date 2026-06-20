@@ -3,7 +3,7 @@ OVLM — Open Vision Launch Monitor
 Entry point for the Windows NUC pipeline.
 
 Usage:
-    python main.py [--no-audio] [--debug]
+    python main.py [--no-audio] [--radar] [--vision-trigger] [--spin-cam] [--debug]
 """
 
 import argparse
@@ -11,6 +11,7 @@ import asyncio
 import logging
 import signal
 import sys
+import threading
 import time
 
 import config
@@ -18,8 +19,10 @@ from audio_trigger import AudioTrigger
 from capture import SpinCapturer, StereoCapturer
 from frame_buffer import FrameBuffer, SpinFrameRing
 from pipeline import TrackingPipeline
+from plate_calib import LiveCollector
 from radar import IWR6843Reader
 from server import PipelineServer
+from vision_trigger import VisionTrigger
 
 
 def main() -> None:
@@ -30,6 +33,9 @@ def main() -> None:
                         help="Enable TI IWR6843ISK radar (also triggers on ball detection)")
     parser.add_argument("--spin-cam", action="store_true",
                         help="Enable the optional high-fps spin camera (config.SPIN_CAM_*)")
+    parser.add_argument("--vision-trigger", action="store_true",
+                        help="Camera-based ball-entering-frame trigger — stand-in for "
+                             "radar until the IWR6843 is wired up")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
@@ -55,9 +61,36 @@ def main() -> None:
         spin_ring = SpinFrameRing()
         spin_cap  = SpinCapturer(on_frame=spin_ring.push)
 
+    # ── Vision trigger (optional, camera-only stand-in for radar) ────────────────
+    vision: VisionTrigger | None = None
+    if args.vision_trigger or config.VISION_TRIGGER_ENABLED:
+        vision = VisionTrigger(on_trigger=lambda t: buffer.trigger(t) if armed else None)
+        log.info("Vision trigger enabled (camera-based ball detection, stand-in for radar)")
+
     pipeline = TrackingPipeline(server, radar=radar, spin_ring=spin_ring)
     buffer   = FrameBuffer(on_flush=pipeline.process)
-    capturer = StereoCapturer(on_pair=buffer.push)
+
+    # Home-plate calibration taps the live stereo pairs below rather than
+    # opening the cameras a second time (plate_calib.py --live owns the
+    # cameras itself; main.py already does, so the two can't run at once).
+    collector: LiveCollector | None = None
+    collector_done = threading.Event()
+
+    def _dispatch_pair(pair):
+        buffer.push(pair)
+        if vision is not None:
+            vision.feed(pair.left)
+        c = collector
+        if c is not None and not c.done:
+            if c.feed(pair.left, pair.right):
+                server.broadcast({
+                    "type": "calibration", "state": "collecting",
+                    "progress": c.count, "total": c.frames,
+                })
+            if c.done:
+                collector_done.set()
+
+    capturer = StereoCapturer(on_pair=_dispatch_pair)
 
     armed = False
 
@@ -66,6 +99,8 @@ def main() -> None:
         armed = True
         if not args.no_audio:
             audio.arm()
+        if vision is not None:
+            vision.arm()
         server.broadcast({"type": "status", "state": "armed", "audioArmed": not args.no_audio})
         log.info("Armed")
 
@@ -74,6 +109,8 @@ def main() -> None:
         armed = False
         if not args.no_audio:
             audio.disarm()
+        if vision is not None:
+            vision.disarm()
         server.broadcast({"type": "status", "state": "idle", "audioArmed": False})
         log.info("Disarmed")
 
@@ -81,6 +118,8 @@ def main() -> None:
         buffer.clear()
         if spin_ring is not None:
             spin_ring.clear()
+        if vision is not None:
+            vision.reset_background()
         server.broadcast({"type": "status", "state": "armed"})
         log.info("Reset")
 
@@ -105,7 +144,42 @@ def main() -> None:
             audio.set_threshold(value)
             log.info("Audio threshold → %.3f", audio.threshold)
 
-    server.set_callbacks(arm=arm, disarm=disarm, reset=reset, set_threshold=set_threshold)
+    def calibrate_home() -> None:
+        nonlocal collector
+        if collector is not None:
+            return   # already running
+        log.info("Starting home-plate calibration …")
+        collector = LiveCollector(config.PLATE_CALIB_FRAMES)
+        collector_done.clear()
+        server.broadcast({
+            "type": "calibration", "state": "collecting",
+            "progress": 0, "total": collector.frames,
+        })
+        threading.Thread(target=_finish_calibration, daemon=True).start()
+
+    def _finish_calibration() -> None:
+        nonlocal collector
+        got_all_samples = collector_done.wait(timeout=20.0)
+        c, collector = collector, None
+        if not got_all_samples:
+            server.broadcast({
+                "type": "calibration", "state": "error",
+                "message": f"Only {c.count}/{c.frames} samples in 20s — "
+                           "make sure the plate is visible in both cameras.",
+            })
+            return
+        result = c.solve(config.CALIBRATION_FILE)
+        if result is None:
+            server.broadcast({"type": "calibration", "state": "error",
+                              "message": "Calibration solve failed — see NUC console log."})
+            return
+        pipeline.reload_calibration()
+        log.info("Calibration complete: baseline=%.1fmm rms=%.1fmm reproj=%.2fpx",
+                 result["baselineMm"], result["rmsMm"], result["reprojPx"])
+        server.broadcast({"type": "calibration", "state": "done", **result})
+
+    server.set_callbacks(arm=arm, disarm=disarm, reset=reset,
+                         set_threshold=set_threshold, calibrate=calibrate_home)
 
     log.info("Starting stereo capture …")
     capturer.start()

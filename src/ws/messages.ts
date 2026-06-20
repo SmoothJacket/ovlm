@@ -31,6 +31,16 @@ export type PiMessage =
     }
   | { type: 'audio_level'; rms: number; peak: number; threshold: number }
   | { type: 'health'; cpuTempC: number; memUsedMb: number; memTotalMb: number; loadAvg1m: number }
+  | {
+      type: 'calibration';
+      state: 'collecting' | 'done' | 'error';
+      progress?: number;
+      total?: number;
+      baselineMm?: number;
+      reprojPx?: number;
+      rmsMm?: number;
+      message?: string;
+    }
   | { type: 'error'; message: string };
 
 /** Messages the browser sends to the launch-monitor backend */
@@ -38,4 +48,5 @@ export type BrowserMessage =
   | { type: 'arm' }
   | { type: 'disarm' }
   | { type: 'reset' }
-  | { type: 'set_threshold'; value: number };
+  | { type: 'set_threshold'; value: number }
+  | { type: 'calibrate' };
