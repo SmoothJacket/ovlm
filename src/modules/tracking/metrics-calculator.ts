@@ -46,6 +46,8 @@ export function computeBallMetrics(
     detectRate: 1,
     evSource: 'camera',
     radarVelocityMph: null,
+    pitchVelocityMph: null,
+    carryDistanceM:   null,
   };
 }
 

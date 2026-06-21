@@ -67,6 +67,10 @@ export interface BallMeasurement {
   evSource: 'camera' | 'radar';
   /** Raw radar Doppler speed in mph, null if radar not active */
   radarVelocityMph: number | null;
+  /** Pitch speed in mph from OPS243 inbound reading, null if no radar */
+  pitchVelocityMph: number | null;
+  /** Measured carry distance in metres from OPS243 FMCW, null if unavailable */
+  carryDistanceM: number | null;
 }
 
 /** Result of the Kalman trajectory filter */

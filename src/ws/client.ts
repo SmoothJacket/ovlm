@@ -12,6 +12,9 @@ type StoreRef = {
   ingestPiMeasurement: (msg: Extract<PiMessage, { type: 'measurement' }>) => void;
   updateAudioLevel: (level: Extract<PiMessage, { type: 'audio_level' }>) => void;
   updatePiHealth:   (h: Extract<PiMessage, { type: 'health' }>) => void;
+  setLastFrame: (frame: Extract<PiMessage, { type: 'calib_frame' }>) => void;
+  setCalibWizardResult: (r: Extract<PiMessage, { type: 'calib_result' }>) => void;
+  setWizardStep: (step: 0 | 1 | 2 | 3) => void;
 };
 
 const BACKOFF_CAP_MS = 30_000;
@@ -104,6 +107,13 @@ class PiClient {
         break;
       case 'error':
         this.store.updatePipelineStatus({ errorMessage: msg.message });
+        break;
+      case 'calib_frame':
+        this.store.setLastFrame(msg);
+        break;
+      case 'calib_result':
+        this.store.setCalibWizardResult(msg);
+        this.store.setWizardStep(msg.ok ? 3 : 1);
         break;
     }
   }

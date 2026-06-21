@@ -109,6 +109,8 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
         radarVelocityMph: msg.radarVelocityMps != null
           ? Math.round(msg.radarVelocityMps * 2.23694 * 10) / 10
           : null,
+        pitchVelocityMph: msg.pitchVelocity ?? null,
+        carryDistanceM:   msg.carryDistanceM ?? null,
         trajectory: msg.trajectory.map((p) => ({
           x: p.x, y: p.y, z: p.z,
           timestamp: p.t * 1_000_000,

@@ -13,11 +13,15 @@ import signal
 import sys
 import time
 
+import dataclasses
+
 import config
 from audio_trigger import AudioTrigger
+from calib_session import CalibSession
 from capture import SpinCapturer, StereoCapturer
 from frame_buffer import FrameBuffer, SpinFrameRing
 from pipeline import TrackingPipeline
+from ops243 import OPS243Reader
 from radar import IWR6843Reader
 from server import PipelineServer
 
@@ -26,6 +30,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="OVLM NUC pipeline")
     parser.add_argument("--no-audio", action="store_true",
                         help="Disable mic trigger (manual arm via browser)")
+    parser.add_argument("--ops243", action="store_true",
+                        help="Enable OPS243-C-FC-RP radar (pitch speed + EV + carry distance)")
     parser.add_argument("--radar", action="store_true",
                         help="Enable TI IWR6843ISK radar (also triggers on ball detection)")
     parser.add_argument("--spin-cam", action="store_true",
@@ -41,7 +47,18 @@ def main() -> None:
 
     server   = PipelineServer()
 
-    # ── Radar (optional) ──────────────────────────────────────────────────────
+    # ── OPS243 radar (plug-and-play: pitch speed + EV + carry distance) ──────
+    ops243: OPS243Reader | None = None
+    if args.ops243 or config.OPS243_ENABLED:
+        try:
+            ops243 = OPS243Reader()
+            ops243.start()
+            log.info("OPS243 radar started on %s", config.OPS243_PORT)
+        except Exception as exc:
+            log.warning("OPS243 not available (%s) — continuing without it", exc)
+            ops243 = None
+
+    # ── TI IWR6843ISK radar (optional, binary mmWave) ─────────────────────────
     radar: IWR6843Reader | None = None
     if args.radar or config.RADAR_ENABLED:
         radar = IWR6843Reader()
@@ -55,7 +72,7 @@ def main() -> None:
         spin_ring = SpinFrameRing()
         spin_cap  = SpinCapturer(on_frame=spin_ring.push)
 
-    pipeline = TrackingPipeline(server, radar=radar, spin_ring=spin_ring)
+    pipeline = TrackingPipeline(server, radar=radar, ops243=ops243, spin_ring=spin_ring)
     buffer   = FrameBuffer(on_flush=pipeline.process)
     capturer = StereoCapturer(on_pair=buffer.push)
 
@@ -105,7 +122,39 @@ def main() -> None:
             audio.set_threshold(value)
             log.info("Audio threshold → %.3f", audio.threshold)
 
-    server.set_callbacks(arm=arm, disarm=disarm, reset=reset, set_threshold=set_threshold)
+    _calib_session: CalibSession | None = None
+
+    def calib_start(height_mm: float, dist_mm: float) -> None:
+        nonlocal _calib_session
+        if _calib_session is not None:
+            _calib_session.release()
+        _calib_session = CalibSession(height_mm, dist_mm)
+        log.info("Calibration session started (height=%.0f mm, dist=%.0f mm)", height_mm, dist_mm)
+
+    def _do_capture() -> None:
+        nonlocal _calib_session
+        if _calib_session is None:
+            return
+        result = _calib_session.capture()
+        server.broadcast({"type": "calib_result", **dataclasses.asdict(result)})
+        if result.ok:
+            log.info("Calibration saved: %s", result.message)
+        else:
+            log.warning("Calibration failed: %s", result.message)
+
+    def calib_capture() -> None:
+        loop.run_in_executor(None, _do_capture)
+
+    def calib_stop() -> None:
+        nonlocal _calib_session
+        if _calib_session is not None:
+            _calib_session.release()
+            _calib_session = None
+        log.info("Calibration session stopped")
+
+    server.set_callbacks(arm=arm, disarm=disarm, reset=reset, set_threshold=set_threshold,
+                         calib_start=calib_start, calib_capture=calib_capture,
+                         calib_stop=calib_stop)
 
     log.info("Starting stereo capture …")
     capturer.start()
@@ -142,6 +191,7 @@ def main() -> None:
             server.serve(),
             server.stream_audio_levels(audio),
             server.stream_health(),
+            server.stream_calib_frames(lambda: _calib_session),
         )
 
     try:
@@ -152,6 +202,8 @@ def main() -> None:
             spin_cap.stop()
         if audio:
             audio.stop()
+        if ops243:
+            ops243.stop()
         if radar:
             radar.stop()
         loop.close()

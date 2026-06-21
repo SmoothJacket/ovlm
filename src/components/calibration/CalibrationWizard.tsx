@@ -1,163 +1,485 @@
 import React from 'react';
+import { useStore } from '@/state/store';
+import { piClient } from '@/ws/client';
 
-/**
- * Calibration is performed on the launch-monitor backend (the NUC), where the
- * cameras are connected — not in the browser. This panel documents the correct
- * workflow; see nuc/CALIBRATION.md for full details.
- */
-export function CalibrationWizard(): React.ReactElement {
+const FT_TO_MM = 304.8;
+const IN_TO_MM = 25.4;
+
+function toMm(ft: number, inches: number): number {
+  return ft * FT_TO_MM + inches * IN_TO_MM;
+}
+
+// ── Step components ───────────────────────────────────────────────────────────
+
+function StepSetup(): React.ReactElement {
+  const heightFt = useStore((s) => s.heightFt);
+  const heightIn = useStore((s) => s.heightIn);
+  const distFt   = useStore((s) => s.distFt);
+  const distIn   = useStore((s) => s.distIn);
+  const setCalibMeasurements = useStore((s) => s.setCalibMeasurements);
+  const setWizardStep        = useStore((s) => s.setWizardStep);
+
+  function start() {
+    const heightMm   = toMm(heightFt, heightIn);
+    const distanceMm = toMm(distFt, distIn);
+    piClient.send({ type: 'calib_start', heightMm, distanceMm });
+    setWizardStep(1);
+  }
+
   return (
-    <div style={styles.root}>
-      <div style={styles.header}>
-        <h2 style={styles.title}>Stereo Camera Calibration</h2>
-        <div style={styles.subtitle}>Runs on the launch monitor (NUC)</div>
-      </div>
-
-      <p style={styles.lead}>
-        Calibration runs on the machine the cameras are plugged into. It writes{' '}
-        <code style={styles.code}>calibration.npz</code> into the{' '}
-        <code style={styles.code}>nuc\</code> folder, which the pipeline loads
-        automatically on start. Recalibrate whenever the cameras are moved.
+    <div style={s.card}>
+      <div style={s.stepLabel}>STEP 1 OF 3 — RIG MEASUREMENTS</div>
+      <h3 style={s.cardTitle}>Enter camera position</h3>
+      <p style={s.body}>
+        Enter where the camera rig is mounted. The plate detector uses these measurements
+        to set the scale for the stereo solve — no ChArUco board needed.
       </p>
 
-      {/* ── Method 1: home plate ─────────────────────────────────────────── */}
-      <div style={styles.card}>
-        <div style={styles.cardHead}>
-          <span style={styles.badgeRec}>RECOMMENDED</span>
-          <span style={styles.cardTitle}>Home plate — no board</span>
-        </div>
-        <p style={styles.cardLead}>
-          A regulation home plate is a known-size target. An AI keypoint model
-          finds its five corners in both cameras and solves the stereo geometry
-          from a single shared view.
-        </p>
-        <ol style={styles.list}>
-          <li>
-            Set your lens in <code style={styles.code}>nuc\config.py</code>:{' '}
-            <code style={styles.code}>LENS_FOCAL_MM</code> (your 5–50&nbsp;mm
-            lens's actual setting) and <code style={styles.code}>SENSOR_PIXEL_PITCH_UM</code>.
-          </li>
-          <li>
-            In the <code style={styles.code}>nuc\</code> folder run:
-            <pre style={styles.cmd}>python plate_calib.py --live</pre>
-            Add <code style={styles.code}>--refine-focal</code> to estimate the
-            focal length from the plate instead of measuring the lens.
-          </li>
-          <li>
-            Place a home plate flat in <strong>both</strong> camera views — as
-            large in frame and as evenly lit as possible — and hold steady while
-            it averages 30 frames.
-          </li>
-          <li>
-            Verify the result (horizontal lines should cross matching features):
-            <pre style={styles.cmd}>python plate_calib.py --verify</pre>
-          </li>
-        </ol>
-        <div style={styles.hint}>
-          Aim for a self-check under ~5&nbsp;mm RMS. No PyTorch needed — a
-          classical detector is the fallback; train the model with{' '}
-          <code style={styles.code}>train_plate_model.py</code> for best robustness.
+      <div style={s.fieldGroup}>
+        <label style={s.label}>Camera height above ground</label>
+        <div style={s.inputRow}>
+          <input style={s.input} type="number" min={0} max={20} step={1}
+            value={heightFt}
+            onChange={(e) => setCalibMeasurements(
+              { ft: Number(e.target.value), in: heightIn },
+              { ft: distFt, in: distIn }
+            )} />
+          <span style={s.unit}>ft</span>
+          <input style={s.input} type="number" min={0} max={11} step={1}
+            value={heightIn}
+            onChange={(e) => setCalibMeasurements(
+              { ft: heightFt, in: Number(e.target.value) },
+              { ft: distFt, in: distIn }
+            )} />
+          <span style={s.unit}>in</span>
         </div>
       </div>
 
-      {/* ── Method 2: ChArUco board ──────────────────────────────────────── */}
-      <div style={styles.card}>
-        <div style={styles.cardHead}>
-          <span style={styles.badgeAlt}>ALTERNATIVE</span>
-          <span style={styles.cardTitle}>ChArUco board — most accurate</span>
+      <div style={s.fieldGroup}>
+        <label style={s.label}>Distance behind home plate</label>
+        <div style={s.inputRow}>
+          <input style={s.input} type="number" min={0} max={60} step={1}
+            value={distFt}
+            onChange={(e) => setCalibMeasurements(
+              { ft: heightFt, in: heightIn },
+              { ft: Number(e.target.value), in: distIn }
+            )} />
+          <span style={s.unit}>ft</span>
+          <input style={s.input} type="number" min={0} max={11} step={1}
+            value={distIn}
+            onChange={(e) => setCalibMeasurements(
+              { ft: heightFt, in: heightIn },
+              { ft: distFt, in: Number(e.target.value) }
+            )} />
+          <span style={s.unit}>in</span>
         </div>
-        <p style={styles.cardLead}>
-          Solves full intrinsics and lens distortion from many board views.
-          Worth doing once to pin down the lens, then use the plate for quick
-          re-checks.
-        </p>
-        <ol style={styles.list}>
-          <li>
-            Generate and print the board, then mount it flat:
-            <pre style={styles.cmd}>python calibrate.py --print-board</pre>
-          </li>
-          <li>
-            Capture ~25 poses, tilting and rotating to cover both full views:
-            <pre style={styles.cmd}>python calibrate.py --live</pre>
-          </li>
-          <li>
-            Verify the rectified alignment:
-            <pre style={styles.cmd}>python calibrate.py --verify</pre>
-          </li>
-        </ol>
-        <div style={styles.hint}>Aim for a reprojection error under 0.5&nbsp;px.</div>
       </div>
 
-      <div style={styles.footer}>
-        Full details and tuning tips: <code style={styles.code}>nuc/CALIBRATION.md</code>
+      <div style={s.hint}>
+        Typical setup: 5 ft 0 in height · 8 ft 0 in behind plate
+      </div>
+
+      <button style={s.btn} onClick={start}>
+        Start Calibration →
+      </button>
+    </div>
+  );
+}
+
+function StepAlign(): React.ReactElement {
+  const lastFrame  = useStore((s) => s.lastFrame);
+  const setWizardStep = useStore((s) => s.setWizardStep);
+
+  const bothFound = lastFrame?.cornersFound[0] === true && lastFrame?.cornersFound[1] === true;
+
+  function capture() {
+    piClient.send({ type: 'calib_capture' });
+    setWizardStep(2);
+  }
+
+  function cancel() {
+    piClient.send({ type: 'calib_stop' });
+    setWizardStep(0);
+  }
+
+  return (
+    <div style={s.card}>
+      <div style={s.stepLabel}>STEP 2 OF 3 — ALIGN CAMERAS</div>
+      <h3 style={s.cardTitle}>Point both cameras at home plate</h3>
+      <p style={s.body}>
+        Place a regulation home plate flat in view of both cameras. Tilt/pan the rig until
+        green corner markers appear on both feeds, then click Capture.
+      </p>
+
+      <div style={s.previewRow}>
+        <div style={s.previewBox}>
+          <div style={s.previewLabel}>
+            <span style={lastFrame?.cornersFound[0] ? s.dotGreen : s.dotRed} />
+            Camera 0
+          </div>
+          {lastFrame
+            ? <img src={`data:image/jpeg;base64,${lastFrame.cam0}`} style={s.preview} alt="cam0" />
+            : <div style={s.previewPlaceholder}>Waiting for feed…</div>
+          }
+        </div>
+        <div style={s.previewBox}>
+          <div style={s.previewLabel}>
+            <span style={lastFrame?.cornersFound[1] ? s.dotGreen : s.dotRed} />
+            Camera 1
+          </div>
+          {lastFrame
+            ? <img src={`data:image/jpeg;base64,${lastFrame.cam1}`} style={s.preview} alt="cam1" />
+            : <div style={s.previewPlaceholder}>Waiting for feed…</div>
+          }
+        </div>
+      </div>
+
+      {!bothFound && (
+        <div style={s.hintWarn}>
+          {lastFrame
+            ? 'Adjust camera aim until both feeds show green corner markers'
+            : 'Connecting to cameras…'}
+        </div>
+      )}
+      {bothFound && (
+        <div style={s.hintOk}>Both cameras see the plate — ready to capture</div>
+      )}
+
+      <div style={s.btnRow}>
+        <button style={s.btnSecondary} onClick={cancel}>Cancel</button>
+        <button style={{ ...s.btn, ...(bothFound ? {} : s.btnDisabled) }}
+          onClick={capture} disabled={!bothFound}>
+          Capture Frame →
+        </button>
       </div>
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+function StepProcessing(): React.ReactElement {
+  return (
+    <div style={s.card}>
+      <div style={s.stepLabel}>STEP 3 OF 3 — SOLVING</div>
+      <h3 style={s.cardTitle}>Averaging frames &amp; solving stereo geometry…</h3>
+      <div style={s.spinnerWrap}>
+        <div style={s.spinner} />
+      </div>
+      <p style={s.body}>
+        Collecting 30 detection samples, then running PnP stereo solve against
+        the plate's known 3-D geometry. This takes ~5 seconds.
+      </p>
+    </div>
+  );
+}
+
+function StepResult(): React.ReactElement {
+  const result     = useStore((s) => s.lastCalibResult);
+  const resetWizard = useStore((s) => s.resetWizard);
+
+  function done() {
+    piClient.send({ type: 'calib_stop' });
+    resetWizard();
+  }
+
+  function retry() {
+    piClient.send({ type: 'calib_stop' });
+    resetWizard();
+  }
+
+  if (!result) return <div style={s.card}><p style={s.body}>No result yet.</p></div>;
+
+  return (
+    <div style={s.card}>
+      {result.ok ? (
+        <>
+          <div style={s.resultOk}>
+            <span style={s.checkmark}>✓</span>
+            <span>Calibration saved</span>
+          </div>
+          <div style={s.metricsRow}>
+            <div style={s.metric}>
+              <div style={s.metricVal}>{result.reprojPx.toFixed(1)} px</div>
+              <div style={s.metricLbl}>Reprojection error</div>
+            </div>
+            <div style={s.metric}>
+              <div style={s.metricVal}>{result.baselineMm.toFixed(0)} mm</div>
+              <div style={s.metricLbl}>Baseline solved</div>
+            </div>
+            <div style={s.metric}>
+              <div style={s.metricVal}>{result.residualMm.toFixed(1)} mm</div>
+              <div style={s.metricLbl}>Triangulation RMS</div>
+            </div>
+          </div>
+          <div style={s.hint}>{result.message}</div>
+        </>
+      ) : (
+        <>
+          <div style={s.resultErr}>
+            <span style={s.xmark}>✗</span>
+            <span>Calibration failed</span>
+          </div>
+          <p style={s.body}>{result.message}</p>
+        </>
+      )}
+
+      <div style={s.btnRow}>
+        <button style={s.btnSecondary} onClick={retry}>Re-calibrate</button>
+        {result.ok && <button style={s.btn} onClick={done}>Done</button>}
+      </div>
+    </div>
+  );
+}
+
+// ── Wizard shell ──────────────────────────────────────────────────────────────
+
+export function CalibrationWizard(): React.ReactElement {
+  const step = useStore((s) => s.wizardStep);
+
+  return (
+    <div style={s.root}>
+      <div style={s.header}>
+        <h2 style={s.title}>Stereo Camera Calibration</h2>
+        <div style={s.subtitle}>Trackman-style guided plate calibration · no board required</div>
+      </div>
+
+      <div style={s.steps}>
+        {(['Setup', 'Align', 'Solving', 'Result'] as const).map((label, i) => (
+          <div key={label} style={{ ...s.stepPip, ...(i === step ? s.stepPipActive : {}) }}>
+            <div style={{ ...s.pipDot, ...(i === step ? s.pipDotActive : i < step ? s.pipDotDone : {}) }}>
+              {i < step ? '✓' : i + 1}
+            </div>
+            <div style={s.pipLabel}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {step === 0 && <StepSetup />}
+      {step === 1 && <StepAlign />}
+      {step === 2 && <StepProcessing />}
+      {step === 3 && <StepResult />}
+    </div>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+
+const s: Record<string, React.CSSProperties> = {
   root: {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
     padding: 24,
-    gap: 16,
+    gap: 20,
     overflow: 'auto',
-    maxWidth: 680,
+    maxWidth: 780,
   },
   header: { marginBottom: 0 },
   title: { fontSize: 18, fontWeight: 700, color: '#aabbd0', margin: 0 },
-  subtitle: { fontSize: 11, color: '#445', marginTop: 4, letterSpacing: '0.1em' },
-  lead: { fontSize: 13, color: '#889', lineHeight: 1.6, margin: 0 },
+  subtitle: { fontSize: 11, color: '#445', marginTop: 4, letterSpacing: '0.1em', textTransform: 'uppercase' },
+
+  // Progress pip row
+  steps: {
+    display: 'flex',
+    gap: 0,
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  stepPip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    opacity: 0.4,
+  },
+  stepPipActive: { opacity: 1 },
+  pipDot: {
+    width: 26,
+    height: 26,
+    borderRadius: '50%',
+    border: '2px solid #2a3a50',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#556',
+    flexShrink: 0,
+  },
+  pipDotActive: { border: '2px solid #44aaff', color: '#44aaff' },
+  pipDotDone:   { border: '2px solid #44ff88', color: '#44ff88', background: '#06200f' },
+  pipLabel: { fontSize: 11, color: '#667', letterSpacing: '0.07em', textTransform: 'uppercase' },
+
+  // Card
   card: {
     background: '#0d0d18',
     border: '1px solid #1a1a30',
     borderRadius: 8,
-    padding: 20,
-  },
-  cardHead: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 },
-  cardTitle: { fontSize: 14, fontWeight: 700, color: '#aabbd0' },
-  badgeRec: {
-    fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
-    color: '#44ff88', background: '#06200f', border: '1px solid #14401f',
-    borderRadius: 4, padding: '2px 7px',
-  },
-  badgeAlt: {
-    fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
-    color: '#66aaff', background: '#001833', border: '1px solid #1a3a6e',
-    borderRadius: 4, padding: '2px 7px',
-  },
-  cardLead: { fontSize: 12, color: '#778', lineHeight: 1.6, margin: '0 0 12px' },
-  list: {
-    paddingLeft: 20,
+    padding: 24,
     display: 'flex',
     flexDirection: 'column',
-    gap: 10,
-    fontSize: 13,
-    color: '#889',
-    lineHeight: 1.6,
-    margin: 0,
+    gap: 16,
   },
-  code: {
-    fontFamily: 'inherit',
-    fontSize: 11,
-    color: '#9cc4ff',
-    background: '#0a1424',
-    border: '1px solid #16243e',
-    borderRadius: 3,
-    padding: '1px 5px',
+  stepLabel: {
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: '0.12em',
+    color: '#44aaff',
+    textTransform: 'uppercase',
   },
-  cmd: {
-    fontFamily: 'inherit',
+  cardTitle: { fontSize: 15, fontWeight: 700, color: '#aabbd0', margin: 0 },
+  body: { fontSize: 13, color: '#778', lineHeight: 1.65, margin: 0 },
+
+  // Measurement inputs
+  fieldGroup: { display: 'flex', flexDirection: 'column', gap: 6 },
+  label: { fontSize: 12, color: '#88a', letterSpacing: '0.05em' },
+  inputRow: { display: 'flex', alignItems: 'center', gap: 8 },
+  input: {
+    width: 64,
+    background: '#07091a',
+    border: '1px solid #1a2a3e',
+    borderRadius: 5,
+    color: '#cde',
+    fontSize: 16,
+    fontWeight: 700,
+    padding: '6px 10px',
+    textAlign: 'center' as const,
+    outline: 'none',
+  },
+  unit: { fontSize: 12, color: '#556', marginRight: 8 },
+  hint: { fontSize: 11, color: '#445', lineHeight: 1.5 },
+  hintWarn: {
     fontSize: 12,
-    color: '#cfe3ff',
-    background: '#07101e',
-    border: '1px solid #16243e',
-    borderRadius: 4,
+    color: '#aa7733',
+    background: '#1a1000',
+    border: '1px solid #2a1800',
+    borderRadius: 5,
     padding: '8px 12px',
-    margin: '6px 0 0',
-    overflowX: 'auto',
   },
-  hint: { fontSize: 11, color: '#556', lineHeight: 1.6, marginTop: 12 },
-  footer: { fontSize: 11, color: '#445', letterSpacing: '0.04em' },
+  hintOk: {
+    fontSize: 12,
+    color: '#44ff88',
+    background: '#061206',
+    border: '1px solid #143014',
+    borderRadius: 5,
+    padding: '8px 12px',
+  },
+
+  // Camera previews
+  previewRow: { display: 'flex', gap: 12 },
+  previewBox: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    background: '#060610',
+    border: '1px solid #111122',
+    borderRadius: 6,
+    padding: 10,
+  },
+  previewLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: 11,
+    color: '#778',
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase' as const,
+  },
+  preview: { width: '100%', borderRadius: 4, display: 'block' },
+  previewPlaceholder: {
+    width: '100%',
+    aspectRatio: '4/3',
+    background: '#0a0a18',
+    borderRadius: 4,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 12,
+    color: '#333',
+  },
+  dotGreen: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: '#44ff88',
+    boxShadow: '0 0 6px #44ff88',
+    flexShrink: 0,
+  },
+  dotRed: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: '#ff4422',
+    flexShrink: 0,
+  },
+
+  // Buttons
+  btnRow: { display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 },
+  btn: {
+    background: '#0f2a4a',
+    border: '1px solid #1a4070',
+    borderRadius: 6,
+    color: '#7ac0ff',
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '9px 20px',
+    cursor: 'pointer',
+  },
+  btnSecondary: {
+    background: 'transparent',
+    border: '1px solid #1a1a30',
+    borderRadius: 6,
+    color: '#556',
+    fontSize: 13,
+    padding: '9px 16px',
+    cursor: 'pointer',
+  },
+  btnDisabled: {
+    opacity: 0.35,
+    cursor: 'not-allowed',
+  },
+
+  // Spinner
+  spinnerWrap: { display: 'flex', justifyContent: 'center', padding: '12px 0' },
+  spinner: {
+    width: 36,
+    height: 36,
+    border: '3px solid #1a2a3e',
+    borderTop: '3px solid #44aaff',
+    borderRadius: '50%',
+    animation: 'spin 0.9s linear infinite',
+  },
+
+  // Result
+  resultOk: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    fontSize: 16,
+    fontWeight: 700,
+    color: '#44ff88',
+  },
+  resultErr: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    fontSize: 16,
+    fontWeight: 700,
+    color: '#ff5533',
+  },
+  checkmark: { fontSize: 22, lineHeight: 1 },
+  xmark:     { fontSize: 22, lineHeight: 1 },
+  metricsRow: {
+    display: 'flex',
+    gap: 16,
+    background: '#07091a',
+    border: '1px solid #111a2a',
+    borderRadius: 8,
+    padding: 16,
+  },
+  metric: { flex: 1, textAlign: 'center' as const },
+  metricVal: { fontSize: 20, fontWeight: 700, color: '#aabbd0' },
+  metricLbl: { fontSize: 10, color: '#445', marginTop: 4, letterSpacing: '0.07em', textTransform: 'uppercase' as const },
 };

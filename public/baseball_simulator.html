@@ -1779,7 +1779,8 @@ const CITY_PROFILES = {
                        water:{dir:-135,span:55,r0:1500,w:700} },
   'Stadium_NYM.glb': { sky:'day',      dt:-170, hi:380, density:700,   // Flushing — bay beyond LF, Manhattan far behind home
                        water:{dir:-30,span:65,r0:1250,w:1300}, open:{dir:90,span:120,r:1000} },
-  'Stadium_BOS.glb': { sky:'golden',   dt:  20, hi:290, density:880 }, // Back Bay towers beyond CF/RF, dense brick low-rise
+  'Stadium_BOS.glb': { sky:'golden',   dt:  20, hi:290, density:880,   // Back Bay towers beyond CF/RF; Green Monster LF
+                       lm:[{t:'greenmonster', deg:-46, dist:380}] },
   'Stadium_BAL.glb': { sky:'golden',   dt:  -5, hi:330, density:760,   // B&O Warehouse looms behind RF
                        lm:[{t:'wh',deg:52,dist:480}] },
   'Stadium_TB.glb':  { sky:'tropic',   dt: 170, hi:170, density:520,   // St. Pete low-rise, Tampa Bay far CF
@@ -1800,8 +1801,9 @@ const CITY_PROFILES = {
                        open:{dir:0,span:360,r:1300}, mtn:{dir:-10,span:110,h:550} },
   'Stadium_OAK.glb': { sky:'dusk',     dt:-170, hi:140, density:420,   // Coliseum lots, Oakland hills beyond CF
                        open:{dir:0,span:360,r:1300}, mtn:{dir:5,span:120,h:380} },
-  'Stadium_SEA.glb': { sky:'overcast', dt: -15, hi:430, density:800,   // Downtown north, Sound behind home, Rainier far SE
-                       water:{dir:-125,span:65,r0:1400,w:1600}, mtn:{dir:140,span:45,h:780} },
+  'Stadium_SEA.glb': { sky:'overcast', dt: -15, hi:430, density:800,   // Downtown north, Sound behind home, Rainier far SE; Needle NW
+                       water:{dir:-125,span:65,r0:1400,w:1600}, mtn:{dir:140,span:45,h:780},
+                       lm:[{t:'needle', deg:-28, dist:2700}] },
   'Stadium_TEX.glb': { sky:'desert',   dt:-150, hi:200, density:500,   // Arlington entertainment district + lots
                        open:{dir:0,span:360,r:1100} },
   'Stadium_ATL.glb': { sky:'day',      dt: -15, hi:280, density:640 }, // Battery mid-rise, Buckhead far
@@ -1810,11 +1812,15 @@ const CITY_PROFILES = {
                        open:{dir:0,span:360,r:1250} },
   'Stadium_WSH.glb': { sky:'day',      dt:-160, hi:170, density:700,   // Height-capped DC, Anacostia beyond RF
                        water:{dir:35,span:70,r0:1050,w:850} },
-  'Stadium_CHC.glb': { sky:'golden',   dt:  25, hi:330, density:920 }, // Wrigleyville rooftops, Loop far SE
-  'Stadium_CIN.glb': { sky:'dusk',     dt:-160, hi:290, density:680,   // Ohio River beyond RF, downtown behind home
-                       water:{dir:20,span:85,r0:850,w:950} },
-  'Stadium_PIT.glb': { sky:'dusk',     dt:   5, hi:390, density:740,   // Allegheny behind CF wall, Golden Triangle across it
-                       water:{dir:10,span:95,r0:680,w:650} },
+  'Stadium_CHC.glb': { sky:'golden',   dt:  25, hi:330, density:920,   // Wrigleyville rooftops, Loop far SE; hand scoreboard CF
+                       lm:[{t:'wrigleyscoreboard', deg:18, dist:580}] },
+  'Stadium_CIN.glb': { sky:'dusk',     dt:-160, hi:290, density:680,   // Ohio River beyond RF; Roebling Bridge RF
+                       water:{dir:20,span:85,r0:850,w:950},
+                       lm:[{t:'bridge', deg:22, dist:820, color:0x9aaa99}] },
+  'Stadium_PIT.glb': { sky:'dusk',     dt:   5, hi:390, density:740,   // Allegheny behind CF; Clemente Bridge CF, Ft Duquesne LF
+                       water:{dir:10,span:75,r0:680,w:650},
+                       lm:[{t:'bridge', deg:8,  dist:720},
+                           {t:'bridge', deg:-12, dist:950, color:0xaaaaaa}] },
   'Stadium_STL.glb': { sky:'day',      dt: -10, hi:300, density:700,   // Gateway Arch over the LF skyline
                        lm:[{t:'arch',deg:-8,dist:1550}] },
   'Stadium_COL.glb': { sky:'day',      dt:-150, hi:340, density:720,   // LoDo behind home, Front Range beyond LF
@@ -1825,8 +1831,9 @@ const CITY_PROFILES = {
                        hills:{dir:0,span:170,h:130}, mtn:{dir:-5,span:120,h:600} },
   'Stadium_SD.glb':  { sky:'dusk',     dt:-165, hi:360, density:780,   // Gaslamp towers behind home, bay beyond RF
                        water:{dir:60,span:60,r0:1500,w:1200} },
-  'Stadium_SF.glb':  { sky:'twilight', dt: -35, hi:390, density:800,   // McCovey Cove right behind RF, SoMa towers LF
-                       water:{dir:70,span:105,r0:560,w:1500} },
+  'Stadium_SF.glb':  { sky:'twilight', dt: -35, hi:390, density:800,   // McCovey Cove right behind RF; Bay Bridge far RF
+                       water:{dir:70,span:105,r0:560,w:1500},
+                       lm:[{t:'baybridge', deg:78, dist:3200}] },
 };
 
 function applySkyPreset(name) {
@@ -1841,6 +1848,10 @@ function applySkyPreset(name) {
   cityGround.material.color.setHex(p.earth);
   scene.background.setHex(p.bg);
   activeSky = p;
+  cityExtras.traverse(c => {
+    if (c.isMesh && c.material.uniforms && c.material.uniforms.uWaterColor)
+      c.material.uniforms.uWaterColor.value.setHex(p.water);
+  });
   return p;
 }
 
@@ -1887,6 +1898,7 @@ function seededRand(str) {
 
 const cityExtras = new THREE.Group(); // water, mountains, hills, landmarks
 cityGroup.add(cityExtras);
+let waterTime = 0;
 
 function clearCity() {
   if (cityMesh) { cityGroup.remove(cityMesh); cityMesh.dispose(); cityMesh = null; }
@@ -1919,7 +1931,31 @@ function buildWater(f, cs) {
   const span = f.span * Math.PI / 180;
   const polarC = sprayToPolar(f.dir);
   const geo = new THREE.RingGeometry(f.r0 * cs, (f.r0 + f.w) * cs, 48, 1, -(polarC + span / 2), span);
-  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: activeSky.water }));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime:       { value: 0 },
+      uWaterColor: { value: new THREE.Color(activeSky.water) },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec3  uWaterColor;
+      varying vec2  vUv;
+      void main() {
+        vec2 uv = vUv + vec2(uTime * 0.012, uTime * 0.008);
+        float wave = sin(uv.x * 14.0 + uTime * 1.2) * sin(uv.y * 10.0 + uTime * 0.9) * 0.5 + 0.5;
+        vec3 col = mix(uWaterColor * 0.82, uWaterColor * 1.22, wave * 0.3);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  });
+  const m = new THREE.Mesh(geo, mat);
   m.rotation.x = -Math.PI / 2;
   m.position.y = -0.30;
   cityExtras.add(m);
@@ -1953,32 +1989,176 @@ function buildRidge(f, R, cs, color, smooth, rand) {
   cityExtras.add(new THREE.Mesh(geo, mat));
 }
 
-// Landmark geometry: Gateway Arch, CN Tower, B&O Warehouse
+// Landmark geometry: Gateway Arch, CN Tower, B&O Warehouse, suspension bridges,
+// Bay Bridge, Space Needle, Wrigley scoreboard, Fenway Green Monster
 function buildLandmark(spec, cs) {
   const g = new THREE.Group();
   if (spec.t === 'arch') {
-    const m = new THREE.Mesh(
-      new THREE.TorusGeometry(300 * cs, 15 * cs, 8, 48, Math.PI),
-      new THREE.MeshLambertMaterial({ color: 0xc8ccd2 })
-    );
-    g.add(m);
+    const mat = new THREE.MeshLambertMaterial({ color: 0xc8ccd2 });
+    // Tapered leg shafts
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(28*cs, 55*cs, 28*cs), mat);
+      leg.position.set(side * 300 * cs, 27.5 * cs, 0);
+      g.add(leg);
+    }
+    // Arch crown
+    const crown = new THREE.Mesh(
+      new THREE.TorusGeometry(300 * cs, 15 * cs, 8, 48, Math.PI), mat);
+    g.add(crown);
+
   } else if (spec.t === 'cn') {
     const conc = new THREE.MeshLambertMaterial({ color: 0xb4b9bf });
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(13 * cs, 26 * cs, 900 * cs, 10), conc);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(13*cs, 26*cs, 900*cs, 10), conc);
     shaft.position.y = 450 * cs;
-    const pod = new THREE.Mesh(new THREE.CylinderGeometry(46 * cs, 40 * cs, 58 * cs, 12), conc);
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(46*cs, 40*cs, 58*cs, 12), conc);
     pod.position.y = 690 * cs;
-    const spike = new THREE.Mesh(new THREE.CylinderGeometry(1.5 * cs, 5 * cs, 200 * cs, 6), conc);
+    const spike = new THREE.Mesh(new THREE.CylinderGeometry(1.5*cs, 5*cs, 200*cs, 6), conc);
     spike.position.y = 1000 * cs;
     g.add(shaft, pod, spike);
+
   } else if (spec.t === 'wh') {
     const wh = new THREE.Mesh(
-      new THREE.BoxGeometry(980 * cs, 88 * cs, 54 * cs),
+      new THREE.BoxGeometry(980*cs, 88*cs, 54*cs),
       new THREE.MeshLambertMaterial({ color: 0x7a4434 })
     );
     wh.position.y = 44 * cs;
     g.add(wh);
+
+  } else if (spec.t === 'bridge') {
+    // Suspension bridge — Roberto Clemente (PIT gold) or Roebling (CIN gray)
+    const col = 'color' in spec ? spec.color : 0xFDB827;
+    const mat = new THREE.MeshLambertMaterial({ color: col });
+    // Deck
+    const dk = new THREE.Mesh(new THREE.BoxGeometry(480*cs, 5*cs, 16*cs), mat);
+    dk.position.y = 12 * cs; g.add(dk);
+    // Two suspension towers
+    for (const tx of [-120, 120]) {
+      const tw = new THREE.Mesh(new THREE.CylinderGeometry(3*cs, 4*cs, 160*cs, 6), mat);
+      tw.position.set(tx * cs, 80 * cs, 0); g.add(tw);
+      const xb = new THREE.Mesh(new THREE.BoxGeometry(22*cs, 5*cs, 5*cs), mat);
+      xb.position.set(tx * cs, 130 * cs, 0); g.add(xb);
+    }
+    // 4 cable segments (approach + main span halves)
+    for (const [ax, ay, bx, by] of [
+      [-240, 12, -120, 155], [240, 12, 120, 155],
+      [-120, 155, 0, 72],   [120, 155, 0, 72],
+    ]) {
+      const dx = (bx - ax) * cs, dy = (by - ay) * cs;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const cable = new THREE.Mesh(new THREE.BoxGeometry(len, 2*cs, 2*cs), mat);
+      cable.position.set((ax+bx)/2 * cs, (ay+by)/2 * cs, 0);
+      cable.rotation.z = Math.atan2(dy, dx); g.add(cable);
+    }
+    // Hangers — parabolic spacing from deck to cable
+    for (let i = 1; i <= 8; i++) {
+      for (const side of [-1, 1]) {
+        const hx = side * i * 14;
+        const t  = Math.abs(hx) / 120;
+        const cabY = 72 + t * t * 83; // parabola: 72 at center → 155 at towers
+        const hLen = Math.max(1, (cabY - 14) * cs);
+        const hgr = new THREE.Mesh(new THREE.BoxGeometry(1.5*cs, hLen, 1.5*cs), mat);
+        hgr.position.set(hx * cs, 14*cs + hLen/2, 0); g.add(hgr);
+      }
+    }
+
+  } else if (spec.t === 'baybridge') {
+    // SF Bay Bridge — two-tower suspension, far background landmark
+    const mat = new THREE.MeshLambertMaterial({ color: 0xaaa090 });
+    // Two main towers
+    for (const tx of [-220, 220]) {
+      const tw = new THREE.Mesh(new THREE.CylinderGeometry(6*cs, 8*cs, 420*cs, 8), mat);
+      tw.position.set(tx * cs, 210 * cs, 0); g.add(tw);
+    }
+    // Double deck
+    for (const dy of [0, 24]) {
+      const d = new THREE.Mesh(new THREE.BoxGeometry(900*cs, 4*cs, 22*cs), mat);
+      d.position.y = (28 + dy) * cs; g.add(d);
+    }
+    // 4 cable segments
+    for (const [ax, ay, bx, by] of [
+      [-520, 22, -220, 390], [520, 22, 220, 390],
+      [-220, 390, 0, 210],   [220, 390, 0, 210],
+    ]) {
+      const dx = (bx - ax) * cs, dy = (by - ay) * cs;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const cable = new THREE.Mesh(new THREE.BoxGeometry(len, 3*cs, 3*cs), mat);
+      cable.position.set((ax+bx)/2*cs, (ay+by)/2*cs, 0);
+      cable.rotation.z = Math.atan2(dy, dx); g.add(cable);
+    }
+    // Eastern approach truss (simplified cantilever silhouette)
+    const truss = new THREE.Mesh(new THREE.BoxGeometry(420*cs, 55*cs, 18*cs), mat);
+    truss.position.set(-720*cs, 55*cs, 0); g.add(truss);
+
+  } else if (spec.t === 'needle') {
+    // Seattle Space Needle
+    const mat = new THREE.MeshLambertMaterial({ color: 0xd0c8b8 });
+    // Tripod legs (3 struts)
+    for (let i = 0; i < 3; i++) {
+      const ang = i * 2 * Math.PI / 3;
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(10*cs, 185*cs, 10*cs), mat);
+      leg.position.set(Math.sin(ang)*75*cs, 92*cs, Math.cos(ang)*75*cs);
+      leg.rotation.z = -Math.sin(ang) * 0.38;
+      leg.rotation.x = -Math.cos(ang) * 0.38;
+      g.add(leg);
+    }
+    // Main shaft (tapered)
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(4*cs, 14*cs, 500*cs, 6), mat);
+    shaft.position.y = 250 * cs; g.add(shaft);
+    // Pod ring
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(56*cs, 50*cs, 14*cs, 16), mat);
+    ring.position.y = 488 * cs; g.add(ring);
+    // Pod dome
+    const pod = new THREE.Mesh(new THREE.SphereGeometry(52*cs, 12, 8, 0, Math.PI*2, 0, Math.PI/2), mat);
+    pod.position.y = 495 * cs; g.add(pod);
+    // Spire
+    const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.5*cs, 2*cs, 120*cs, 6), mat);
+    spire.position.y = 610 * cs; g.add(spire);
+
+  } else if (spec.t === 'wrigleyscoreboard') {
+    // Wrigley Field hand-operated scoreboard + rooftop buildings
+    const boardMat = new THREE.MeshLambertMaterial({ color: 0x2a4a1a });
+    const board = new THREE.Mesh(new THREE.BoxGeometry(200*cs, 85*cs, 8*cs), boardMat);
+    board.position.y = 42 * cs; g.add(board);
+    // Clock face
+    const clockMat = new THREE.MeshLambertMaterial({ color: 0xf0e090 });
+    const clk = new THREE.Mesh(new THREE.CylinderGeometry(18*cs, 18*cs, 4*cs, 12), clockMat);
+    clk.position.set(0, 60*cs, 5*cs); clk.rotation.x = Math.PI / 2; g.add(clk);
+    // Flag poles
+    const poleMat = new THREE.MeshLambertMaterial({ color: 0xbbbbbb });
+    for (const px of [-55, 55]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.5*cs, 1.5*cs, 52*cs, 6), poleMat);
+      pole.position.set(px*cs, 111*cs, 0); g.add(pole);
+    }
+    // Rooftop buildings flanking the scoreboard
+    const brickMat = new THREE.MeshLambertMaterial({ color: 0x8a7060 });
+    for (const [i, side] of [[0,-1],[1,-1],[2,-1],[0,1],[1,1],[2,1]]) {
+      const bldg = new THREE.Mesh(new THREE.BoxGeometry(70*cs, 55*cs, 40*cs), brickMat);
+      bldg.position.set(side*(130 + i*80)*cs, 27*cs, 0); g.add(bldg);
+    }
+
+  } else if (spec.t === 'greenmonster') {
+    // Fenway Park Green Monster (LF wall)
+    const wallMat = new THREE.MeshLambertMaterial({ color: 0x1a5c1a });
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(330*cs, 37*cs, 8*cs), wallMat);
+    wall.position.y = 18.5 * cs; g.add(wall);
+    // Manual scoreboard panels (dark insets)
+    const panMat = new THREE.MeshLambertMaterial({ color: 0x0f2c0f });
+    for (const [px, py] of [[-80,25],[0,25],[80,25],[-80,12],[0,12],[80,12]]) {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(55*cs, 10*cs, 3*cs), panMat);
+      p.position.set(px*cs, py*cs, 5*cs); g.add(p);
+    }
+    // Advertisement panels (cream/yellow)
+    const adMat = new THREE.MeshLambertMaterial({ color: 0xf0e0a0 });
+    for (const px of [-125, 125]) {
+      const ad = new THREE.Mesh(new THREE.BoxGeometry(58*cs, 18*cs, 2*cs), adMat);
+      ad.position.set(px*cs, 28*cs, 5*cs); g.add(ad);
+    }
+    // Protective screen above the wall
+    const scrMat = new THREE.MeshLambertMaterial({ color: 0x2a6a2a, transparent: true, opacity: 0.45 });
+    const scr = new THREE.Mesh(new THREE.BoxGeometry(330*cs, 22*cs, 2*cs), scrMat);
+    scr.position.y = (37 + 11) * cs; g.add(scr);
   }
+
   const [x, z] = wallXZ(spec.dist * cs, spec.deg);
   g.position.set(x, 0, z);
   g.lookAt(0, 0, 0); // face the park (box length runs tangentially)
@@ -3953,6 +4133,12 @@ let physAcc = 0;
 function animate() {
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
+
+  waterTime += dt;
+  cityExtras.traverse(c => {
+    if (c.isMesh && c.material.uniforms && c.material.uniforms.uTime)
+      c.material.uniforms.uTime.value = waterTime;
+  });
 
   if (simActive || pitchActive) {
     physAcc += dt;

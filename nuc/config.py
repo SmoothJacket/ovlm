@@ -105,6 +105,17 @@ BALL_MASS_KG       = 0.1417
 BALL_DIAMETER_M    = 0.0737
 DRAG_COEFF         = 0.35
 
+# ── Radar (OmniPreSense OPS243-C-FC-RP) ──────────────────────────────────────
+# Single USB-serial port — plug the USB cable into any NUC USB-A port.
+# Linux: usually /dev/ttyACM0 (check: ls /dev/ttyACM*)
+# Windows: check Device Manager → Ports (COM & LPT)
+OPS243_ENABLED       = True
+OPS243_PORT          = '/dev/ttyACM0'
+OPS243_BAUD          = 9600
+OPS243_MIN_PITCH_MPS = 13.4   # ~30 mph inbound — slower = ignore (noise / wind)
+OPS243_MIN_EV_MPS    = 17.9   # ~40 mph outbound — slower = ignore (bunts / foul tips)
+OPS243_AGREE_FRACTION = 0.15  # EV agreement threshold vs. camera (15%)
+
 # ── Radar (TI IWR6843ISK) ─────────────────────────────────────────────────────
 # On Windows the board registers as two COM ports after the USB driver installs.
 # Check Device Manager → Ports (COM & LPT) — typically two consecutive ports.

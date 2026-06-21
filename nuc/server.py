@@ -15,9 +15,10 @@ Messages received from clients:
 """
 
 import asyncio
+import base64
 import json
 import logging
-from typing import Any, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set
 
 try:
     import websockets
@@ -39,13 +40,20 @@ class PipelineServer:
         self._arm_cb    = None
         self._disarm_cb = None
         self._reset_cb  = None
-        self._threshold_cb = None   # called with float when browser sets a new threshold
+        self._threshold_cb    = None
+        self._calib_start_cb  = None   # (height_mm, dist_mm)
+        self._calib_capture_cb = None
+        self._calib_stop_cb   = None
 
-    def set_callbacks(self, arm=None, disarm=None, reset=None, set_threshold=None) -> None:
-        self._arm_cb        = arm
-        self._disarm_cb     = disarm
-        self._reset_cb      = reset
-        self._threshold_cb  = set_threshold
+    def set_callbacks(self, arm=None, disarm=None, reset=None, set_threshold=None,
+                      calib_start=None, calib_capture=None, calib_stop=None) -> None:
+        self._arm_cb           = arm
+        self._disarm_cb        = disarm
+        self._reset_cb         = reset
+        self._threshold_cb     = set_threshold
+        self._calib_start_cb   = calib_start
+        self._calib_capture_cb = calib_capture
+        self._calib_stop_cb    = calib_stop
 
     async def _handler(self, ws: "WebSocketServerProtocol") -> None:
         self._clients.add(ws)
@@ -66,6 +74,15 @@ class PipelineServer:
                         self._threshold_cb(float(msg["value"]))
                     except (KeyError, ValueError):
                         pass
+                elif t == "calib_start" and self._calib_start_cb:
+                    try:
+                        self._calib_start_cb(float(msg["heightMm"]), float(msg["distanceMm"]))
+                    except (KeyError, ValueError):
+                        pass
+                elif t == "calib_capture" and self._calib_capture_cb:
+                    self._calib_capture_cb()
+                elif t == "calib_stop" and self._calib_stop_cb:
+                    self._calib_stop_cb()
 
         except Exception:
             pass
@@ -114,6 +131,25 @@ class PipelineServer:
                 "memUsedMb":   round(h.mem_used_mb, 0),
                 "memTotalMb":  round(h.mem_total_mb, 0),
                 "loadAvg1m":   round(h.load_avg_1m, 2),
+            }))
+
+    async def stream_calib_frames(self, get_session) -> None:
+        """Broadcast annotated preview frames at ~15 fps while a calib session is active."""
+        while True:
+            await asyncio.sleep(1 / 15)
+            session = get_session()
+            if session is None or not self._clients:
+                continue
+            try:
+                j0, j1, f0, f1 = session.grab_annotated()
+            except Exception:
+                continue
+            await self._broadcast_async(json.dumps({
+                "type":         "calib_frame",
+                "cam0":         base64.b64encode(j0).decode(),
+                "cam1":         base64.b64encode(j1).decode(),
+                "cornersFound": [f0, f1],
+                "step":         session.step,
             }))
 
     async def serve(self) -> None:

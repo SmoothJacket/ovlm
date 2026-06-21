@@ -27,15 +27,24 @@ export type PiMessage =
       };
       evSource: 'camera' | 'radar';
       radarVelocityMps: number | null;
+      pitchVelocity:    number | null;   // mph — OPS243 inbound reading (pitch speed)
+      carryDistanceM:   number | null;   // metres — OPS243 FMCW range at peak distance
       trajectory: Array<{ x: number; y: number; z: number; t: number }>;
     }
   | { type: 'audio_level'; rms: number; peak: number; threshold: number }
   | { type: 'health'; cpuTempC: number; memUsedMb: number; memTotalMb: number; loadAvg1m: number }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'calib_frame'; cam0: string; cam1: string;
+      cornersFound: [boolean, boolean]; step: 'align' | 'capturing' | 'done' }
+  | { type: 'calib_result'; ok: boolean; reprojPx: number;
+      residualMm: number; baselineMm: number; message: string };
 
 /** Messages the browser sends to the launch-monitor backend */
 export type BrowserMessage =
   | { type: 'arm' }
   | { type: 'disarm' }
   | { type: 'reset' }
-  | { type: 'set_threshold'; value: number };
+  | { type: 'set_threshold'; value: number }
+  | { type: 'calib_start'; heightMm: number; distanceMm: number }
+  | { type: 'calib_capture' }
+  | { type: 'calib_stop' };

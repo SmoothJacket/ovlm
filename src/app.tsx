@@ -5,11 +5,14 @@ import { piClient } from './ws/client';
 import { initSimulatorBridge } from './integrations/simulator';
 
 export function App(): React.ReactElement {
-  const wsHost            = useStore((s) => s.wsHost);
-  const updatePipeline    = useStore((s) => s.updatePipelineStatus);
-  const ingestMeasurement = useStore((s) => s.ingestPiMeasurement);
-  const updateAudioLevel  = useStore((s) => s.updateAudioLevel);
-  const updatePiHealth    = useStore((s) => s.updatePiHealth);
+  const wsHost              = useStore((s) => s.wsHost);
+  const updatePipeline      = useStore((s) => s.updatePipelineStatus);
+  const ingestMeasurement   = useStore((s) => s.ingestPiMeasurement);
+  const updateAudioLevel    = useStore((s) => s.updateAudioLevel);
+  const updatePiHealth      = useStore((s) => s.updatePiHealth);
+  const setLastFrame        = useStore((s) => s.setLastFrame);
+  const setCalibWizardResult = useStore((s) => s.setCalibWizardResult);
+  const setWizardStep       = useStore((s) => s.setWizardStep);
 
   useEffect(() => {
     piClient.connect(wsHost, {
@@ -17,6 +20,9 @@ export function App(): React.ReactElement {
       ingestPiMeasurement:  ingestMeasurement,
       updateAudioLevel,
       updatePiHealth,
+      setLastFrame,
+      setCalibWizardResult,
+      setWizardStep,
     });
     return () => piClient.disconnect();
   }, [wsHost]);

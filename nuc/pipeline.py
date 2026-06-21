@@ -29,9 +29,10 @@ MPS_TO_MPH = 2.23694
 
 
 class TrackingPipeline:
-    def __init__(self, server, radar=None, spin_ring=None) -> None:
+    def __init__(self, server, radar=None, ops243=None, spin_ring=None) -> None:
         self._server       = server
-        self._radar        = radar       # optional IWR6843Reader
+        self._radar        = radar       # optional IWR6843Reader (TI mmWave)
+        self._ops243       = ops243      # optional OPS243Reader (OmniPreSense)
         self._spin_ring    = spin_ring   # optional SpinFrameRing (640 fps spin cam)
         self._tracker0     = BallTracker()
         self._tracker1     = BallTracker()
@@ -133,14 +134,43 @@ class TrackingPipeline:
         detect_rate = len(points) / max(len(frames), 1)
 
         # ── Radar cross-check ─────────────────────────────────────────────────
-        # If a radar frame is available, find the highest-SNR, fast-enough
-        # point and compare against the camera-derived exit velocity.
-        # If they agree within RADAR_AGREE_FRACTION, prefer the radar value
-        # (Doppler is more direct than trajectory fitting).
         radar_velocity_mps: Optional[float] = None
+        pitch_velocity_mph: Optional[float] = None
+        carry_distance_m:   Optional[float] = None
         ev_source = 'camera'
 
-        if self._radar is not None:
+        # OPS243-C-FC-RP (primary radar — pitch speed, EV, FMCW range)
+        if self._ops243 is not None:
+            ops_ev_mph    = self._ops243.latest_ev_mph()
+            ops_pitch_mph = self._ops243.latest_pitch_mph()
+            ops_range_m   = self._ops243.latest_range_m()
+            self._ops243.clear()
+
+            if ops_pitch_mph is not None:
+                pitch_velocity_mph = round(ops_pitch_mph, 1)
+
+            if ops_range_m is not None:
+                carry_distance_m = round(ops_range_m, 2)
+
+            if ops_ev_mph is not None:
+                cam_mph = metrics.exit_velocity_mph
+                agree   = abs(ops_ev_mph - cam_mph) / max(cam_mph, 1) <= config.OPS243_AGREE_FRACTION
+                radar_velocity_mps = ops_ev_mph / MPS_TO_MPH
+                if agree:
+                    metrics   = dataclasses.replace(metrics, exit_velocity_mph=round(ops_ev_mph, 1))
+                    ev_source = 'radar'
+                    log.info("OPS243 EV %.1f mph (camera=%.1f mph, Δ=%.1f%%)",
+                             ops_ev_mph, cam_mph,
+                             100 * abs(ops_ev_mph - cam_mph) / max(cam_mph, 1))
+                else:
+                    log.info("OPS243 EV %.1f mph disagrees with camera %.1f mph "
+                             "(Δ=%.1f%% > %.0f%% tolerance) — keeping camera",
+                             ops_ev_mph, cam_mph,
+                             100 * abs(ops_ev_mph - cam_mph) / max(cam_mph, 1),
+                             config.OPS243_AGREE_FRACTION * 100)
+
+        # TI IWR6843ISK (optional secondary — higher spatial resolution)
+        if self._radar is not None and ev_source == 'camera':
             frame = self._radar.latest_frame()
             if frame and frame.points:
                 best = max(
@@ -156,14 +186,14 @@ class TrackingPipeline:
                     agree     = abs(radar_mph - cam_mph) / max(cam_mph, 1) <= config.RADAR_AGREE_FRACTION
                     radar_velocity_mps = abs(best.vel)
                     if agree:
-                        metrics = dataclasses.replace(metrics, exit_velocity_mph=round(radar_mph, 1))
+                        metrics   = dataclasses.replace(metrics, exit_velocity_mph=round(radar_mph, 1))
                         ev_source = 'radar'
-                        log.info("Radar EV %.1f mph (camera=%.1f mph, Δ=%.1f%%)",
+                        log.info("IWR6843 EV %.1f mph (camera=%.1f mph, Δ=%.1f%%)",
                                  radar_mph, cam_mph,
                                  100 * abs(radar_mph - cam_mph) / max(cam_mph, 1))
                     else:
                         log.info(
-                            "Radar EV %.1f mph disagrees with camera %.1f mph "
+                            "IWR6843 EV %.1f mph disagrees with camera %.1f mph "
                             "(Δ=%.1f%% > %.0f%% tolerance) — keeping camera",
                             radar_mph, cam_mph,
                             100 * abs(radar_mph - cam_mph) / max(cam_mph, 1),
@@ -192,6 +222,8 @@ class TrackingPipeline:
             "pointsRejected":     metrics.points_rejected,
             "evSource":           ev_source,
             "radarVelocityMps":   round(radar_velocity_mps, 3) if radar_velocity_mps is not None else None,
+            "pitchVelocity":      pitch_velocity_mph,   # mph, from OPS243 inbound reading
+            "carryDistanceM":     carry_distance_m,     # meters, from OPS243 FMCW range
             "trajectory":         [
                 {"x": p.x, "y": p.y, "z": p.z, "t": p.timestamp}
                 for p in metrics.trajectory
