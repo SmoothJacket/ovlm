@@ -39,6 +39,9 @@ def main() -> None:
     parser.add_argument("--vision-trigger", action="store_true",
                         help="Camera-based ball-entering-frame trigger — stand-in for "
                              "radar until the IWR6843 is wired up")
+    parser.add_argument("--no-cameras", action="store_true",
+                        help="Skip camera initialisation — WebSocket server runs without hardware "
+                             "(useful for UI development / testing on a machine with no cameras)")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
@@ -194,17 +197,25 @@ def main() -> None:
     server.set_callbacks(arm=arm, disarm=disarm, reset=reset,
                          set_threshold=set_threshold, calibrate=calibrate_home)
 
-    log.info("Starting stereo capture …")
-    capturer.start()
+    if args.no_cameras:
+        log.warning("--no-cameras: running without stereo capture (UI / WebSocket only)")
+    else:
+        log.info("Starting stereo capture …")
+        try:
+            capturer.start()
+        except RuntimeError as exc:
+            log.error("Camera init failed: %s", exc)
+            log.error("Run with --no-cameras to start without hardware.")
+            raise
 
-    if spin_cap is not None:
-        if spin_cap.start():
-            log.info("Spin camera started (index %d @ %d fps)",
-                     config.SPIN_CAM_IDX, config.SPIN_CAM_FPS)
-        else:
-            log.warning("Spin camera not found at index %d — "
-                        "falling back to stereo cam 0 for spin", config.SPIN_CAM_IDX)
-            spin_cap = None
+        if spin_cap is not None:
+            if spin_cap.start():
+                log.info("Spin camera started (index %d @ %d fps)",
+                         config.SPIN_CAM_IDX, config.SPIN_CAM_FPS)
+            else:
+                log.warning("Spin camera not found at index %d — "
+                            "falling back to stereo cam 0 for spin", config.SPIN_CAM_IDX)
+                spin_cap = None
 
     log.info("Ready. Connect browser to ws://localhost:%d", config.WS_PORT)
     server.broadcast({"type": "status", "state": "idle"})
@@ -234,7 +245,8 @@ def main() -> None:
     try:
         loop.run_until_complete(_run())
     finally:
-        capturer.stop()
+        if not args.no_cameras:
+            capturer.stop()
         if spin_cap:
             spin_cap.stop()
         if audio:

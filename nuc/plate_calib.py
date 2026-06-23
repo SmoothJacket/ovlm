@@ -258,7 +258,7 @@ def _annotate_jpeg(frame: np.ndarray, corners, label: str, count: int, total: in
         cv2.polylines(d, [corners.astype(np.int32)], True, (0, 200, 50), 2)
         status_col, status_txt = (0, 220, 60), "PLATE FOUND"
     else:
-        cv2.putText(d, "SEARCHING…", (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (60, 60, 220), 2)
+        cv2.putText(d, "SEARCHING...", (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (60, 60, 220), 2)
         status_col, status_txt = (60, 60, 220), "SEARCHING"
     cv2.putText(d, label, (8, _PREVIEW_H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
     cv2.putText(d, status_txt, (_PREVIEW_W - 160, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_col, 2)
@@ -357,7 +357,7 @@ class LiveCollector:
         count = self.count
         if last is None:
             blank = np.zeros((_PREVIEW_H, _PREVIEW_W, 3), dtype=np.uint8)
-            cv2.putText(blank, "WAITING FOR CAMERAS…", (8, _PREVIEW_H // 2),
+            cv2.putText(blank, "WAITING FOR CAMERAS...", (8, _PREVIEW_H // 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (50, 50, 50), 2)
             _, b = cv2.imencode(".jpg", blank, [cv2.IMWRITE_JPEG_QUALITY, 72])
             bw = bytes(b)
