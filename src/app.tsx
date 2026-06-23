@@ -11,8 +11,6 @@ export function App(): React.ReactElement {
   const updateAudioLevel    = useStore((s) => s.updateAudioLevel);
   const updatePiHealth      = useStore((s) => s.updatePiHealth);
   const setLastFrame        = useStore((s) => s.setLastFrame);
-  const setCalibWizardResult = useStore((s) => s.setCalibWizardResult);
-  const setWizardStep       = useStore((s) => s.setWizardStep);
   const updateCalibrationProgress = useStore((s) => s.updateCalibrationProgress);
 
   useEffect(() => {
@@ -22,8 +20,6 @@ export function App(): React.ReactElement {
       updateAudioLevel,
       updatePiHealth,
       setLastFrame,
-      setCalibWizardResult,
-      setWizardStep,
       updateCalibrationProgress,
     });
     return () => piClient.disconnect();

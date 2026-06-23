@@ -1,9 +1,9 @@
 """
 OVLM — Open Vision Launch Monitor
-Entry point for the Windows NUC pipeline.
+Entry point for the NUC pipeline.
 
 Usage:
-    python main.py [--no-audio] [--radar] [--vision-trigger] [--spin-cam] [--debug]
+    python main.py [--no-audio] [--ops243] [--radar] [--vision-trigger] [--spin-cam] [--debug]
 """
 
 import argparse
@@ -14,11 +14,8 @@ import sys
 import threading
 import time
 
-import dataclasses
-
 import config
 from audio_trigger import AudioTrigger
-from calib_session import CalibSession
 from capture import SpinCapturer, StereoCapturer
 from frame_buffer import FrameBuffer, SpinFrameRing
 from pipeline import TrackingPipeline
@@ -51,7 +48,7 @@ def main() -> None:
     )
     log = logging.getLogger("main")
 
-    server   = PipelineServer()
+    server = PipelineServer()
 
     # ── OPS243 radar (plug-and-play: pitch speed + EV + carry distance) ──────
     ops243: OPS243Reader | None = None
@@ -78,34 +75,26 @@ def main() -> None:
         spin_ring = SpinFrameRing()
         spin_cap  = SpinCapturer(on_frame=spin_ring.push)
 
-    # ── Vision trigger (optional, camera-only stand-in for radar) ────────────────
+    # ── Vision trigger (optional, camera-only stand-in for radar) ────────────
     vision: VisionTrigger | None = None
     if args.vision_trigger or config.VISION_TRIGGER_ENABLED:
         vision = VisionTrigger(on_trigger=lambda t: buffer.trigger(t) if armed else None)
         log.info("Vision trigger enabled (camera-based ball detection, stand-in for radar)")
 
-    pipeline = TrackingPipeline(server, radar=radar, ops243=ops243, spin_ring=spin_ring)
-    buffer   = FrameBuffer(on_flush=pipeline.process)
+    pipeline  = TrackingPipeline(server, radar=radar, ops243=ops243, spin_ring=spin_ring)
+    buffer    = FrameBuffer(on_flush=pipeline.process)
 
-    # Home-plate calibration taps the live stereo pairs below rather than
-    # opening the cameras a second time (plate_calib.py --live owns the
-    # cameras itself; main.py already does, so the two can't run at once).
-    collector: LiveCollector | None = None
-    collector_done = threading.Event()
+    # ── Home-plate calibration (always-on preview + one-click collect) ────────
+    # LiveCollector streams annotated frames to the browser at all times so the
+    # calibration panel always shows live plate-detection overlays. Samples are
+    # only accumulated after the user clicks "Calibrate".
+    collector = LiveCollector()
 
     def _dispatch_pair(pair):
         buffer.push(pair)
         if vision is not None:
             vision.feed(pair.left)
-        c = collector
-        if c is not None and not c.done:
-            if c.feed(pair.left, pair.right):
-                server.broadcast({
-                    "type": "calibration", "state": "collecting",
-                    "progress": c.count, "total": c.frames,
-                })
-            if c.done:
-                collector_done.set()
+        collector.feed(pair.left, pair.right)
 
     capturer = StereoCapturer(on_pair=_dispatch_pair)
 
@@ -147,8 +136,6 @@ def main() -> None:
     else:
         audio = None
 
-    # Radar trigger: fires the same buffer.trigger() path as audio.
-    # buffer.trigger() expects a monotonic timestamp, not the radar velocity.
     if radar is not None:
         def _radar_trigger(pt) -> None:
             if armed:
@@ -161,43 +148,11 @@ def main() -> None:
             audio.set_threshold(value)
             log.info("Audio threshold → %.3f", audio.threshold)
 
-    _calib_session: CalibSession | None = None
-
-    def calib_start(height_mm: float, dist_mm: float) -> None:
-        nonlocal _calib_session
-        if _calib_session is not None:
-            _calib_session.release()
-        _calib_session = CalibSession(height_mm, dist_mm)
-        log.info("Calibration session started (height=%.0f mm, dist=%.0f mm)", height_mm, dist_mm)
-
-    def _do_capture() -> None:
-        nonlocal _calib_session
-        if _calib_session is None:
-            return
-        result = _calib_session.capture()
-        server.broadcast({"type": "calib_result", **dataclasses.asdict(result)})
-        if result.ok:
-            log.info("Calibration saved: %s", result.message)
-        else:
-            log.warning("Calibration failed: %s", result.message)
-
-    def calib_capture() -> None:
-        loop.run_in_executor(None, _do_capture)
-
-    def calib_stop() -> None:
-        nonlocal _calib_session
-        if _calib_session is not None:
-            _calib_session.release()
-            _calib_session = None
-        log.info("Calibration session stopped")
-
     def calibrate_home() -> None:
-        nonlocal collector
-        if collector is not None:
-            return   # already running
+        if collector.collecting:
+            return
         log.info("Starting home-plate calibration …")
-        collector = LiveCollector(config.PLATE_CALIB_FRAMES)
-        collector_done.clear()
+        collector.start_collecting()
         server.broadcast({
             "type": "calibration", "state": "collecting",
             "progress": 0, "total": collector.frames,
@@ -205,17 +160,28 @@ def main() -> None:
         threading.Thread(target=_finish_calibration, daemon=True).start()
 
     def _finish_calibration() -> None:
-        nonlocal collector
-        got_all_samples = collector_done.wait(timeout=20.0)
-        c, collector = collector, None
-        if not got_all_samples:
-            server.broadcast({
-                "type": "calibration", "state": "error",
-                "message": f"Only {c.count}/{c.frames} samples in 20s — "
-                           "make sure the plate is visible in both cameras.",
-            })
-            return
-        result = c.solve(config.CALIBRATION_FILE)
+        deadline = time.monotonic() + 30.0
+        last_broadcast = 0
+        while not collector.done:
+            time.sleep(0.15)
+            now = time.monotonic()
+            if now > deadline:
+                collector.stop_collecting()
+                server.broadcast({
+                    "type": "calibration", "state": "error",
+                    "message": f"Only {collector.count}/{collector.frames} samples in 30 s — "
+                               "make sure the plate is fully visible in both cameras.",
+                })
+                return
+            if now - last_broadcast >= 0.25 and collector.count > 0:
+                server.broadcast({
+                    "type": "calibration", "state": "collecting",
+                    "progress": collector.count, "total": collector.frames,
+                })
+                last_broadcast = now
+
+        collector.stop_collecting()
+        result = collector.solve(config.CALIBRATION_FILE)
         if result is None:
             server.broadcast({"type": "calibration", "state": "error",
                               "message": "Calibration solve failed — see NUC console log."})
@@ -225,9 +191,8 @@ def main() -> None:
                  result["baselineMm"], result["rmsMm"], result["reprojPx"])
         server.broadcast({"type": "calibration", "state": "done", **result})
 
-    server.set_callbacks(arm=arm, disarm=disarm, reset=reset, set_threshold=set_threshold,
-                         calib_start=calib_start, calib_capture=calib_capture,
-                         calib_stop=calib_stop, calibrate=calibrate_home)
+    server.set_callbacks(arm=arm, disarm=disarm, reset=reset,
+                         set_threshold=set_threshold, calibrate=calibrate_home)
 
     log.info("Starting stereo capture …")
     capturer.start()
@@ -251,7 +216,6 @@ def main() -> None:
         log.info("Received %s — shutting down …", sig_name)
         loop.stop()
 
-    # asyncio.loop.add_signal_handler is Unix-only; use signal.signal on Windows
     if sys.platform == "win32":
         signal.signal(signal.SIGINT,
                       lambda sig, frame: loop.call_soon_threadsafe(loop.stop))
@@ -264,7 +228,7 @@ def main() -> None:
             server.serve(),
             server.stream_audio_levels(audio),
             server.stream_health(),
-            server.stream_calib_frames(lambda: _calib_session),
+            server.stream_calib_frames(lambda: collector),
         )
 
     try:

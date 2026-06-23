@@ -13,8 +13,6 @@ type StoreRef = {
   updateAudioLevel: (level: Extract<PiMessage, { type: 'audio_level' }>) => void;
   updatePiHealth:   (h: Extract<PiMessage, { type: 'health' }>) => void;
   setLastFrame: (frame: Extract<PiMessage, { type: 'calib_frame' }>) => void;
-  setCalibWizardResult: (r: Extract<PiMessage, { type: 'calib_result' }>) => void;
-  setWizardStep: (step: 0 | 1 | 2 | 3) => void;
   updateCalibrationProgress: (msg: Extract<PiMessage, { type: 'calibration' }>) => void;
 };
 
@@ -114,10 +112,6 @@ class PiClient {
         break;
       case 'calib_frame':
         this.store.setLastFrame(msg);
-        break;
-      case 'calib_result':
-        this.store.setCalibWizardResult(msg);
-        this.store.setWizardStep(msg.ok ? 3 : 1);
         break;
     }
   }

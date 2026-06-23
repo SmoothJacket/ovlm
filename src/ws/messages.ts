@@ -55,7 +55,4 @@ export type BrowserMessage =
   | { type: 'disarm' }
   | { type: 'reset' }
   | { type: 'set_threshold'; value: number }
-  | { type: 'calibrate' }
-  | { type: 'calib_start'; heightMm: number; distanceMm: number }
-  | { type: 'calib_capture' }
-  | { type: 'calib_stop' };
+  | { type: 'calibrate' };

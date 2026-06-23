@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from typing import Optional, Tuple
 
 import cv2
@@ -37,6 +38,9 @@ import numpy as np
 
 import config
 from plate_detector import detect_plate_corners, using_learned_model
+
+_PREVIEW_W = 640
+_PREVIEW_H = 480
 
 IN_TO_M = 0.0254
 
@@ -237,16 +241,57 @@ def average_corners_live(frames: int) -> Tuple[Optional[np.ndarray], Optional[np
     return np.mean(acc0, axis=0), np.mean(acc1, axis=0), img_size
 
 
-class LiveCollector:
-    """Headless plate-corner sample accumulator driven by externally-supplied
-    frame pairs, instead of opening the cameras itself. Lets main.py's
-    "Calibrate" button tap the stereo pairs StereoCapturer is already
-    pulling, rather than fight it for the camera handles."""
+def _annotate_jpeg(frame: np.ndarray, corners, label: str, count: int, total: int) -> bytes:
+    """Annotate a frame with plate corners and encode to JPEG for browser preview."""
+    d = frame.copy()
+    h, w = d.shape[:2]
+    if (w, h) != (_PREVIEW_W, _PREVIEW_H):
+        sx, sy = _PREVIEW_W / w, _PREVIEW_H / h
+        d = cv2.resize(d, (_PREVIEW_W, _PREVIEW_H))
+        if corners is not None:
+            corners = corners * np.array([sx, sy])
+    if corners is not None:
+        for i, p in enumerate(corners):
+            cv2.circle(d, (int(p[0]), int(p[1])), 6, (0, 220, 60), -1)
+            cv2.putText(d, str(i), (int(p[0]) + 7, int(p[1]) - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 220, 60), 1)
+        cv2.polylines(d, [corners.astype(np.int32)], True, (0, 200, 50), 2)
+        status_col, status_txt = (0, 220, 60), "PLATE FOUND"
+    else:
+        cv2.putText(d, "SEARCHING…", (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (60, 60, 220), 2)
+        status_col, status_txt = (60, 60, 220), "SEARCHING"
+    cv2.putText(d, label, (8, _PREVIEW_H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
+    cv2.putText(d, status_txt, (_PREVIEW_W - 160, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_col, 2)
+    if count > 0:
+        cv2.putText(d, f"{count}/{total}", (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 180, 220), 2)
+    _, buf = cv2.imencode(".jpg", d, [cv2.IMWRITE_JPEG_QUALITY, 72])
+    return bytes(buf)
 
-    def __init__(self, frames: int = config.PLATE_CALIB_FRAMES) -> None:
-        self.frames = frames
+
+class LiveCollector:
+    """Always-on plate-corner accumulator driven by live stereo frame pairs.
+
+    Runs continuously as a preview (storing the latest annotated frames so the
+    browser can show live plate-detection overlays), but only accumulates
+    calibration samples after start_collecting() is called. This gives a
+    Trackman-style UX: cameras are always live, one click starts the solve.
+
+    Detection runs every `every_nth` frames (default 30) to avoid starving the
+    ball-tracking capture thread at 210 fps — ~7 fps is plenty for calibration.
+    """
+
+    def __init__(self, frames: int = config.PLATE_CALIB_FRAMES,
+                 every_nth: int = 30) -> None:
+        self.frames    = frames
+        self.every_nth = every_nth
         self._acc0: list = []
         self._acc1: list = []
+        self._collecting = False
+        self._lock  = threading.Lock()
+        self._last  = None          # (left_bgr, right_bgr, corners0, corners1)
+        self._feed_n = 0
+
+    # ── Public properties ─────────────────────────────────────────────────────
 
     @property
     def count(self) -> int:
@@ -254,24 +299,80 @@ class LiveCollector:
 
     @property
     def done(self) -> bool:
-        return self.count >= self.frames
+        return self._collecting and len(self._acc0) >= self.frames
+
+    @property
+    def collecting(self) -> bool:
+        return self._collecting
+
+    @property
+    def step(self) -> str:
+        """Mirrors CalibSession.step for compatibility with stream_calib_frames."""
+        if self.done:
+            return 'done'
+        return 'capturing' if self._collecting else 'align'
+
+    # ── Control ───────────────────────────────────────────────────────────────
+
+    def start_collecting(self) -> None:
+        """Begin accumulating samples. Safe to call from any thread."""
+        self._acc0.clear()
+        self._acc1.clear()
+        with self._lock:
+            self._collecting = True
+
+    def stop_collecting(self) -> None:
+        with self._lock:
+            self._collecting = False
+
+    # ── Frame feed (called from capture thread) ───────────────────────────────
 
     def feed(self, left: np.ndarray, right: np.ndarray) -> bool:
-        """Try to detect the plate in both frames. Returns True if this pair
-        contributed a sample."""
+        """Store the latest frame pair for preview; accumulate if collecting.
+        Subsampled to every_nth frames to keep CPU load low. Returns True only
+        when a sample was added to the accumulator."""
+        self._feed_n += 1
+        if self._feed_n % self.every_nth != 0:
+            return False
+
         c0 = canonical_order(detect_plate_corners(left))
         c1 = canonical_order(detect_plate_corners(right))
-        if c0 is None or c1 is None:
-            return False
-        self._acc0.append(c0)
-        self._acc1.append(c1)
-        return True
+
+        with self._lock:
+            self._last = (left.copy(), right.copy(), c0, c1)
+            collecting = self._collecting
+
+        if collecting and c0 is not None and c1 is not None and not self.done:
+            self._acc0.append(c0)
+            self._acc1.append(c1)
+            return True
+        return False
+
+    # ── Preview (called from server async loop at ~15 fps) ───────────────────
+
+    def grab_annotated(self) -> Tuple[bytes, bytes, bool, bool]:
+        """Return (jpeg0, jpeg1, found0, found1) — safe to call from any thread."""
+        with self._lock:
+            last = self._last
+        count = self.count
+        if last is None:
+            blank = np.zeros((_PREVIEW_H, _PREVIEW_W, 3), dtype=np.uint8)
+            cv2.putText(blank, "WAITING FOR CAMERAS…", (8, _PREVIEW_H // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (50, 50, 50), 2)
+            _, b = cv2.imencode(".jpg", blank, [cv2.IMWRITE_JPEG_QUALITY, 72])
+            bw = bytes(b)
+            return bw, bw, False, False
+        left, right, c0, c1 = last
+        j0 = _annotate_jpeg(left,  c0, "CAM 0", count, self.frames)
+        j1 = _annotate_jpeg(right, c1, "CAM 1", count, self.frames)
+        return j0, j1, (c0 is not None), (c1 is not None)
+
+    # ── Solve ─────────────────────────────────────────────────────────────────
 
     def solve(self, out_path: str) -> Optional[dict]:
-        """Average the accumulated samples and solve. Returns stats on
-        success, None if there weren't enough good samples or the solve
-        failed."""
-        if self.count < max(5, self.frames // 4):
+        """Average accumulated samples and run the stereo PnP solve.
+        Returns result dict on success, None on failure."""
+        if len(self._acc0) < max(5, self.frames // 4):
             return None
         c0 = np.mean(self._acc0, axis=0)
         c1 = np.mean(self._acc1, axis=0)
