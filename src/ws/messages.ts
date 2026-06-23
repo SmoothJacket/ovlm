@@ -33,6 +33,16 @@ export type PiMessage =
     }
   | { type: 'audio_level'; rms: number; peak: number; threshold: number }
   | { type: 'health'; cpuTempC: number; memUsedMb: number; memTotalMb: number; loadAvg1m: number }
+  | {
+      type: 'calibration';
+      state: 'collecting' | 'done' | 'error';
+      progress?: number;
+      total?: number;
+      baselineMm?: number;
+      reprojPx?: number;
+      rmsMm?: number;
+      message?: string;
+    }
   | { type: 'error'; message: string }
   | { type: 'calib_frame'; cam0: string; cam1: string;
       cornersFound: [boolean, boolean]; step: 'align' | 'capturing' | 'done' }
@@ -45,6 +55,7 @@ export type BrowserMessage =
   | { type: 'disarm' }
   | { type: 'reset' }
   | { type: 'set_threshold'; value: number }
+  | { type: 'calibrate' }
   | { type: 'calib_start'; heightMm: number; distanceMm: number }
   | { type: 'calib_capture' }
   | { type: 'calib_stop' };

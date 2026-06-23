@@ -18,6 +18,16 @@ export interface PiHealth {
   loadAvg1m:  number;
 }
 
+export interface CalibrationProgress {
+  state: 'collecting' | 'done' | 'error';
+  progress?: number;
+  total?: number;
+  baselineMm?: number;
+  reprojPx?: number;
+  rmsMm?: number;
+  message?: string;
+}
+
 export interface SessionSlice {
   swings: SwingSession[];
   activeSwingId: string | null;
@@ -25,6 +35,7 @@ export interface SessionSlice {
   wsHost: string;
   audioLevel: AudioLevel | null;
   piHealth:   PiHealth | null;
+  calibrationProgress: CalibrationProgress | null;
   allTimeBestEv:   number;
   newRecordSwingId: string | null;   // set for ~3s when a swing beats the all-time record
 
@@ -36,6 +47,7 @@ export interface SessionSlice {
   clearSwings: () => void;
   updateAudioLevel: (level: AudioLevel) => void;
   updatePiHealth:   (health: PiHealth) => void;
+  updateCalibrationProgress: (progress: CalibrationProgress) => void;
   clearNewRecord: () => void;
 }
 
@@ -65,6 +77,7 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
   wsHost: loadWsHost(),
   audioLevel: null,
   piHealth:   null,
+  calibrationProgress: null,
   allTimeBestEv:    parseFloat(localStorage.getItem(STORAGE_KEY_ATR) ?? '0') || 0,
   newRecordSwingId: null,
 
@@ -150,5 +163,6 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
 
   updateAudioLevel: (level)  => set({ audioLevel: level }),
   updatePiHealth:   (health) => set({ piHealth: health }),
+  updateCalibrationProgress: (progress) => set({ calibrationProgress: progress }),
   clearNewRecord:   ()       => set({ newRecordSwingId: null }),
 });

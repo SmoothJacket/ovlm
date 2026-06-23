@@ -5,6 +5,7 @@ Messages sent to clients:
   { "type": "status",      "state": "armed"|"processing"|"idle", ... }
   { "type": "measurement", "exitVelocity": 95.2, "launchAngle": 14.3, ... }
   { "type": "audio_level", "rms": 0.12, "peak": 0.31, "threshold": 0.40 }
+  { "type": "calibration", "state": "collecting"|"done"|"error", ... }
   { "type": "error",       "message": "..." }
 
 Messages received from clients:
@@ -12,6 +13,7 @@ Messages received from clients:
   { "type": "disarm" }
   { "type": "reset" }
   { "type": "set_threshold", "value": 0.28 }
+  { "type": "calibrate" }
 """
 
 import asyncio
@@ -40,13 +42,15 @@ class PipelineServer:
         self._arm_cb    = None
         self._disarm_cb = None
         self._reset_cb  = None
-        self._threshold_cb    = None
-        self._calib_start_cb  = None   # (height_mm, dist_mm)
+        self._threshold_cb     = None
+        self._calib_start_cb   = None
         self._calib_capture_cb = None
-        self._calib_stop_cb   = None
+        self._calib_stop_cb    = None
+        self._calibrate_cb     = None
 
     def set_callbacks(self, arm=None, disarm=None, reset=None, set_threshold=None,
-                      calib_start=None, calib_capture=None, calib_stop=None) -> None:
+                      calib_start=None, calib_capture=None, calib_stop=None,
+                      calibrate=None) -> None:
         self._arm_cb           = arm
         self._disarm_cb        = disarm
         self._reset_cb         = reset
@@ -54,6 +58,7 @@ class PipelineServer:
         self._calib_start_cb   = calib_start
         self._calib_capture_cb = calib_capture
         self._calib_stop_cb    = calib_stop
+        self._calibrate_cb     = calibrate
 
     async def _handler(self, ws: "WebSocketServerProtocol") -> None:
         self._clients.add(ws)
@@ -83,6 +88,8 @@ class PipelineServer:
                     self._calib_capture_cb()
                 elif t == "calib_stop" and self._calib_stop_cb:
                     self._calib_stop_cb()
+                elif t == "calibrate" and self._calibrate_cb:
+                    self._calibrate_cb()
 
         except Exception:
             pass

@@ -13,6 +13,7 @@ export function App(): React.ReactElement {
   const setLastFrame        = useStore((s) => s.setLastFrame);
   const setCalibWizardResult = useStore((s) => s.setCalibWizardResult);
   const setWizardStep       = useStore((s) => s.setWizardStep);
+  const updateCalibrationProgress = useStore((s) => s.updateCalibrationProgress);
 
   useEffect(() => {
     piClient.connect(wsHost, {
@@ -23,6 +24,7 @@ export function App(): React.ReactElement {
       setLastFrame,
       setCalibWizardResult,
       setWizardStep,
+      updateCalibrationProgress,
     });
     return () => piClient.disconnect();
   }, [wsHost]);

@@ -116,6 +116,18 @@ OPS243_MIN_PITCH_MPS = 13.4   # ~30 mph inbound — slower = ignore (noise / win
 OPS243_MIN_EV_MPS    = 17.9   # ~40 mph outbound — slower = ignore (bunts / foul tips)
 OPS243_AGREE_FRACTION = 0.15  # EV agreement threshold vs. camera (15%)
 
+# ── Vision trigger (camera-only stand-in for radar) ───────────────────────────
+# Continuously runs the same MOG2 + HoughCircles detector as detect.py on
+# camera 0 and fires the same buffer.trigger() path as the mic/radar — catches
+# a ball the moment it enters the frame (e.g. cameras facing out over the
+# field) without needing the crack sound or the IWR6843 board wired up.
+# Meant as a stopgap until radar is connected: --radar is more robust once
+# available (a person or bat passing through frame can register here as a
+# "ball"; radar only fires on objects actually moving at pitch/exit speed).
+VISION_TRIGGER_ENABLED    = False
+VISION_TRIGGER_EVERY_NTH  = 4      # run detection on 1 of every N live frames
+VISION_TRIGGER_DEBOUNCE_S = 0.6    # matches AUDIO_DEBOUNCE_S
+
 # ── Radar (TI IWR6843ISK) ─────────────────────────────────────────────────────
 # On Windows the board registers as two COM ports after the USB driver installs.
 # Check Device Manager → Ports (COM & LPT) — typically two consecutive ports.

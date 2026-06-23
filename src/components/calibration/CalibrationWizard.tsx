@@ -9,6 +9,12 @@ function toMm(ft: number, inches: number): number {
   return ft * FT_TO_MM + inches * IN_TO_MM;
 }
 
+function grade(rmsMm: number, reprojPx: number): { label: string; color: string } {
+  if (rmsMm < 5 && reprojPx < 1.5)  return { label: 'Excellent', color: '#44ff88' };
+  if (rmsMm < 15 && reprojPx < 3)   return { label: 'Good',      color: '#ffaa00' };
+  return { label: 'Rough — move the plate larger in frame / improve lighting', color: '#ff4455' };
+}
+
 // ── Step components ───────────────────────────────────────────────────────────
 
 function StepSetup(): React.ReactElement {
@@ -156,6 +162,17 @@ function StepAlign(): React.ReactElement {
   );
 }
 
+function Metric({ label, value, unit }: { label: string; value: string; unit: string }) {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: 9, color: '#445', letterSpacing: '0.1em' }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: '#cfe3ff', fontVariantNumeric: 'tabular-nums' }}>
+        {value}<span style={{ fontSize: 10, color: '#556', marginLeft: 2 }}>{unit}</span>
+      </div>
+    </div>
+  );
+}
+
 function StepProcessing(): React.ReactElement {
   return (
     <div style={s.card}>
@@ -197,18 +214,12 @@ function StepResult(): React.ReactElement {
             <span>Calibration saved</span>
           </div>
           <div style={s.metricsRow}>
-            <div style={s.metric}>
-              <div style={s.metricVal}>{result.reprojPx.toFixed(1)} px</div>
-              <div style={s.metricLbl}>Reprojection error</div>
-            </div>
-            <div style={s.metric}>
-              <div style={s.metricVal}>{result.baselineMm.toFixed(0)} mm</div>
-              <div style={s.metricLbl}>Baseline solved</div>
-            </div>
-            <div style={s.metric}>
-              <div style={s.metricVal}>{result.residualMm.toFixed(1)} mm</div>
-              <div style={s.metricLbl}>Triangulation RMS</div>
-            </div>
+            <Metric label="REPROJ ERROR" value={result.reprojPx.toFixed(1)} unit="px" />
+            <Metric label="BASELINE"     value={result.baselineMm.toFixed(0)} unit="mm" />
+            <Metric label="PLATE RMS"    value={result.residualMm.toFixed(1)} unit="mm" />
+          </div>
+          <div style={{ color: grade(result.residualMm, result.reprojPx).color, fontSize: 11, fontWeight: 700 }}>
+            {grade(result.residualMm, result.reprojPx).label}
           </div>
           <div style={s.hint}>{result.message}</div>
         </>
@@ -479,7 +490,4 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: 8,
     padding: 16,
   },
-  metric: { flex: 1, textAlign: 'center' as const },
-  metricVal: { fontSize: 20, fontWeight: 700, color: '#aabbd0' },
-  metricLbl: { fontSize: 10, color: '#445', marginTop: 4, letterSpacing: '0.07em', textTransform: 'uppercase' as const },
 };

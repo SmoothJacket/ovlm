@@ -3,6 +3,7 @@ import { useStore, usePipelineStatus, useWsHost } from '@/state/store';
 import { piClient } from '@/ws/client';
 import type { BallMeasurement } from '@/types/tracking';
 import type { AudioLevel } from '@/state/session.slice';
+import { LiveCameras } from './LiveCameras';
 
 export function DualVideoPanel(): React.ReactElement {
   const status    = usePipelineStatus();
@@ -32,6 +33,8 @@ export function DualVideoPanel(): React.ReactElement {
 
   return (
     <div style={styles.root}>
+      <LiveCameras />
+
       {/* ── Connection card ────────────────────────────────────── */}
       <div style={styles.card}>
         <div style={styles.cardTitle}>MONITOR CONNECTION</div>

@@ -237,6 +237,55 @@ def average_corners_live(frames: int) -> Tuple[Optional[np.ndarray], Optional[np
     return np.mean(acc0, axis=0), np.mean(acc1, axis=0), img_size
 
 
+class LiveCollector:
+    """Headless plate-corner sample accumulator driven by externally-supplied
+    frame pairs, instead of opening the cameras itself. Lets main.py's
+    "Calibrate" button tap the stereo pairs StereoCapturer is already
+    pulling, rather than fight it for the camera handles."""
+
+    def __init__(self, frames: int = config.PLATE_CALIB_FRAMES) -> None:
+        self.frames = frames
+        self._acc0: list = []
+        self._acc1: list = []
+
+    @property
+    def count(self) -> int:
+        return len(self._acc0)
+
+    @property
+    def done(self) -> bool:
+        return self.count >= self.frames
+
+    def feed(self, left: np.ndarray, right: np.ndarray) -> bool:
+        """Try to detect the plate in both frames. Returns True if this pair
+        contributed a sample."""
+        c0 = canonical_order(detect_plate_corners(left))
+        c1 = canonical_order(detect_plate_corners(right))
+        if c0 is None or c1 is None:
+            return False
+        self._acc0.append(c0)
+        self._acc1.append(c1)
+        return True
+
+    def solve(self, out_path: str) -> Optional[dict]:
+        """Average the accumulated samples and solve. Returns stats on
+        success, None if there weren't enough good samples or the solve
+        failed."""
+        if self.count < max(5, self.frames // 4):
+            return None
+        c0 = np.mean(self._acc0, axis=0)
+        c1 = np.mean(self._acc1, axis=0)
+        img_size = (config.WIDTH, config.HEIGHT)
+        if not calibrate(c0, c1, img_size, out_path, refine_focal=False):
+            return None
+        data = np.load(out_path)
+        return {
+            "baselineMm": float(data["baseline_mm"]),
+            "reprojPx":   float(data["reproj_px"]),
+            "rmsMm":      float(data["triangulation_rms_mm"]),
+        }
+
+
 def _annot(frame, corners, label):
     d = frame.copy()
     cv2.putText(d, label, (8, config.HEIGHT - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6,

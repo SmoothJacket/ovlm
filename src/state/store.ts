@@ -19,6 +19,7 @@ export const useStore = create<OVLMStore>()((...args) => ({
 export const useCalibration = () => useStore((s) => s.calibrationData);
 export const useCalibrationState = () => useStore((s) => s.calibrationState);
 export const usePipelineStatus = () => useStore((s) => s.pipelineStatus);
+export const useCalibrationProgress = () => useStore((s) => s.calibrationProgress);
 export const useWsHost = () => useStore((s) => s.wsHost);
 export const useActiveSwing = () =>
   useStore((s) => s.swings.find((sw) => sw.id === s.activeSwingId) ?? null);

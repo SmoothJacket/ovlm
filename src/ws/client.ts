@@ -15,6 +15,7 @@ type StoreRef = {
   setLastFrame: (frame: Extract<PiMessage, { type: 'calib_frame' }>) => void;
   setCalibWizardResult: (r: Extract<PiMessage, { type: 'calib_result' }>) => void;
   setWizardStep: (step: 0 | 1 | 2 | 3) => void;
+  updateCalibrationProgress: (msg: Extract<PiMessage, { type: 'calibration' }>) => void;
 };
 
 const BACKOFF_CAP_MS = 30_000;
@@ -104,6 +105,9 @@ class PiClient {
         break;
       case 'health':
         this.store.updatePiHealth(msg);
+        break;
+      case 'calibration':
+        this.store.updateCalibrationProgress(msg);
         break;
       case 'error':
         this.store.updatePipelineStatus({ errorMessage: msg.message });
