@@ -19,9 +19,11 @@ WIDTH      = 640
 HEIGHT     = 480
 FRAMERATE  = 210         # fps, stereo pair — must match a mode the sensor supports
 
-# OpenCV capture backend — CAP_MSMF is the Windows default (Media Foundation).
-# Switch to cv2.CAP_DSHOW if MSMF can't reach the target framerate.
-CAMERA_BACKEND = cv2.CAP_MSMF
+# OpenCV capture backend.
+# Windows: cv2.CAP_MSMF (Media Foundation) or cv2.CAP_DSHOW
+# macOS:   cv2.CAP_AVFOUNDATION
+import sys as _sys
+CAMERA_BACKEND = cv2.CAP_AVFOUNDATION if _sys.platform == "darwin" else cv2.CAP_MSMF
 
 # These cameras only deliver their high frame rates over MJPEG (the default
 # YUY2/uncompressed path caps at ~30 fps). The FOURCC must be set BEFORE the
