@@ -13,25 +13,167 @@ import cv2
 # resolution, and 210 fps already gives ~40+ points per flight window, so finer
 # pixels beat more frames here. (For maximum accuracy you can instead use the
 # full 1280×800@120 mode; for maximum temporal density drop to 320×240@420.)
-CAM0_IDX   = 0          # OpenCV camera index for left stereo camera
-CAM1_IDX   = 1          # OpenCV camera index for right stereo camera
 WIDTH      = 640
 HEIGHT     = 480
 FRAMERATE  = 210         # fps, stereo pair — must match a mode the sensor supports
 
-# OpenCV capture backend.
-# Windows: cv2.CAP_MSMF (Media Foundation) or cv2.CAP_DSHOW
-# macOS:   cv2.CAP_AVFOUNDATION
+# Camera indices — set below in the platform-specific block (skips FaceTime /
+# Continuity cameras on macOS). Override with camera_settings.json if needed.
+
+# ── Platform-specific camera backend & exposure ───────────────────────────────
 import sys as _sys
-CAMERA_BACKEND = cv2.CAP_AVFOUNDATION if _sys.platform == "darwin" else cv2.CAP_MSMF
+
+
+# Probe parameters for identifying the two global-shutter cameras on macOS by
+# measured hardware capability. system_profiler / name matching is unreliable
+# because OpenCV's AVFoundation enumeration order isn't guaranteed to match,
+# and Continuity / Studio Display cameras can shuffle the list. We instead
+# open each index and measure actual FPS — only the QILOVE-class global-
+# shutter cameras can sustain >100 fps via MJPG at 640×480; FaceTime, iPhone
+# Continuity, and Studio Display cameras top out around 30 fps.
+_PROBE_MAX_INDEX  = 6
+_PROBE_DURATION_S = 1.2
+_PROBE_MIN_FPS    = 100.0
+
+# Filled in below by _macos_stereo_indices(); read by main.py at startup so
+# the names of the two chosen cameras can be logged for verification.
+_MACOS_CAM_NAMES: list = ["", ""]
+_MACOS_CAM_FPS:   list = [0.0, 0.0]
+
+
+def _measure_fps_and_size(idx: int) -> tuple:
+    """Open camera index `idx`, push it into MJPG@640×480@210fps mode, then
+    measure actual fps over _PROBE_DURATION_S seconds. Returns
+    (fps, width, height) — (0, 0, 0) if the camera doesn't open or doesn't
+    deliver any frames in that window.
+
+    AVFoundation's index order does NOT match `system_profiler`'s output, so
+    we cannot rely on names — only on what the device actually delivers."""
+    cap = cv2.VideoCapture(idx, cv2.CAP_AVFOUNDATION)
+    if not cap.isOpened():
+        return (0.0, 0, 0)
+    try:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS,          210.0)
+        # Warm-up frame (first read sometimes blocks while the device negotiates)
+        cap.read()
+        import time as _t
+        t0 = _t.monotonic()
+        n, w, h = 0, 0, 0
+        while _t.monotonic() - t0 < _PROBE_DURATION_S:
+            ok, f = cap.read()
+            if ok and f is not None:
+                n += 1
+                if w == 0:
+                    h, w = f.shape[:2]
+        elapsed = _t.monotonic() - t0
+        return (n / elapsed if elapsed > 0 else 0.0, w, h)
+    finally:
+        cap.release()
+
+
+def _macos_stereo_indices() -> tuple:
+    """Probe each AVFoundation camera index to find the two highest-fps ones —
+    those are the QILOVE global-shutter cameras. Any camera unable to sustain
+    _PROBE_MIN_FPS (default 100 fps) is rejected, so the laptop's FaceTime
+    camera, iPhone Continuity, Studio Display, and screen-capture devices
+    are excluded by their HARDWARE LIMIT, not by name (system_profiler order
+    is unreliable — it doesn't necessarily match AVFoundation index order).
+
+    Override the probe by setting both OVLM_CAM0_IDX and OVLM_CAM1_IDX env
+    vars (useful for tests on machines with no cameras, or for forcing a
+    specific pair when the auto-pick gets it wrong).
+
+    Raises RuntimeError if fewer than two high-fps cameras are found."""
+    import os as _os
+    env0, env1 = _os.environ.get("OVLM_CAM0_IDX"), _os.environ.get("OVLM_CAM1_IDX")
+    if env0 is not None and env1 is not None:
+        try:
+            i0, i1 = int(env0), int(env1)
+            _MACOS_CAM_NAMES[0] = f"env-forced idx {i0}"
+            _MACOS_CAM_NAMES[1] = f"env-forced idx {i1}"
+            return i0, i1
+        except ValueError:
+            pass   # fall through to probe if env vars are garbage
+
+    print("[config] Probing cameras for stereo pair (this takes a few seconds)…",
+          flush=True)
+    candidates = []  # (idx, fps, w, h)
+    for idx in range(_PROBE_MAX_INDEX):
+        fps, w, h = _measure_fps_and_size(idx)
+        if fps <= 0:
+            continue
+        passed = "✓" if fps >= _PROBE_MIN_FPS else "✗ (too slow — built-in / Continuity)"
+        print(f"[config]   idx {idx}: {fps:6.1f} fps  {w}×{h}  {passed}",
+              flush=True)
+        candidates.append((idx, fps, w, h))
+
+    fast = [c for c in candidates if c[1] >= _PROBE_MIN_FPS]
+    if len(fast) >= 2:
+        # Two fastest = the global-shutter pair. Stable index order so
+        # cam0/cam1 mapping doesn't flip between runs.
+        fast.sort(key=lambda c: -c[1])
+        picks = sorted(fast[:2], key=lambda c: c[0])
+        (i0, f0, w0, h0), (i1, f1, w1, h1) = picks[0], picks[1]
+        _MACOS_CAM_NAMES[0] = f"Global Shutter @ {w0}×{h0}"
+        _MACOS_CAM_NAMES[1] = f"Global Shutter @ {w1}×{h1}"
+        _MACOS_CAM_FPS[0],   _MACOS_CAM_FPS[1]   = f0, f1
+        return i0, i1
+
+    raise RuntimeError(
+        f"Need 2 global-shutter cameras delivering ≥{_PROBE_MIN_FPS:.0f} fps; "
+        f"found {len(fast)}. Probed indices: "
+        f"{[(i, round(f,1), w, h) for i, f, w, h in candidates]}. "
+        f"Plug both QILOVE cameras into USB and try again."
+    )
+
+
+def _macos_default_ops243_port() -> str:
+    """Auto-detect the OPS243 USB-serial port on macOS. Picks the lowest-
+    numbered /dev/cu.usbmodem* device (the OPS243 enumerates as a CDC ACM
+    device; if anything else is plugged into a USB port at the same time it
+    will also show up here, so override via OVLM_OPS243_PORT env if needed)."""
+    import glob as _glob, os as _os
+    env = _os.environ.get("OVLM_OPS243_PORT")
+    if env:
+        return env
+    matches = sorted(_glob.glob("/dev/cu.usbmodem*"))
+    return matches[0] if matches else "/dev/cu.usbmodem14201"   # fallback
+
+
+if _sys.platform == "darwin":
+    CAMERA_BACKEND = cv2.CAP_AVFOUNDATION
+    # macOS AVFoundation exposes CAP_PROP_EXPOSURE in absolute seconds, not the
+    # log₂-seconds convention used by DirectShow/V4L2.  Setting -11 (intended as
+    # ≈0.5 ms log₂) is interpreted as -11 s — invalid — producing black frames.
+    # Disable manual exposure on macOS; let AVFoundation auto-expose instead.
+    # For production QILOVE cameras on Mac, tune via camera_check.py once you
+    # know the right absolute-seconds value for your lens + lighting.
+    APPLY_EXPOSURE  = False
+    _OPS243_PORT_DEFAULT = _macos_default_ops243_port()
+    CAM0_IDX, CAM1_IDX = _macos_stereo_indices()
+elif _sys.platform == "win32":
+    CAMERA_BACKEND  = cv2.CAP_MSMF
+    APPLY_EXPOSURE  = True
+    _OPS243_PORT_DEFAULT = 'COM3'
+    CAM0_IDX, CAM1_IDX = 0, 1
+else:  # Linux / NUC
+    CAMERA_BACKEND  = cv2.CAP_V4L2
+    APPLY_EXPOSURE  = True
+    _OPS243_PORT_DEFAULT = '/dev/ttyACM0'
+    CAM0_IDX, CAM1_IDX = 0, 1
 
 # These cameras only deliver their high frame rates over MJPEG (the default
 # YUY2/uncompressed path caps at ~30 fps). The FOURCC must be set BEFORE the
 # resolution/fps or the camera stays in the slow uncompressed mode.
+# On macOS, AVFoundation accepts MJPG for UVC cameras (QILOVE included);
+# built-in cameras silently ignore the FOURCC and use their native format.
 CAMERA_FOURCC = "MJPG"
 
-# ── Exposure (CRITICAL for ball tracking) ─────────────────────────────────────
-# On Windows, OpenCV sets exposure in log₂ seconds (DirectShow / MSMF convention):
+# ── Exposure (CRITICAL for ball tracking on Linux/Windows) ────────────────────
+# On Linux/Windows, OpenCV sets exposure in log₂ seconds (V4L2 / DirectShow):
 #   -6 ≈ 15 ms,  -7 ≈ 7.8 ms,  -8 ≈ 3.9 ms,
 #   -9 ≈ 2 ms,  -10 ≈ 1 ms,   -11 ≈ 0.5 ms,  -12 ≈ 0.25 ms
 #
@@ -39,9 +181,9 @@ CAMERA_FOURCC = "MJPG"
 # acceptable. At auto-exposure (often -6 to -8) it smears 160+ mm: undetectable.
 # Tune interactively with: python camera_check.py --preview
 #
-# Note: exact range and step size are camera/driver-dependent.
+# APPLY_EXPOSURE=False on macOS — see note above.
 EXPOSURE_VALUE  = -11    # overridden by camera_settings.json if present
-GAIN_VALUE      = 4      # 0–255 for most DirectShow/MSMF cameras; -1 to skip
+GAIN_VALUE      = 4      # 0–255 for most V4L2/DirectShow cameras; -1 to skip
 
 # ── Spin camera (optional third camera) ───────────────────────────────────────
 # Dedicated high-speed camera for spin rate / spin axis via seam tracking.
@@ -83,11 +225,29 @@ if _os.path.exists(_settings_file):
 BASELINE_M      = 0.12   # meters between lens centers — measure your rig
 FOCAL_LENGTH_PX = 460.0  # approximate; stereo calibration overwrites this
 
+# ── Lens focal length (varifocal 5–50 mm; set to match physical lens position) ─
+# PITCHING (camera 10 ft behind plate = 70 ft from release):
+#   Use 25–50 mm — NOT the wide end. A pitch breaks ≤18 in so the path is only
+#   ~1 m wide; a 25 mm lens sees a 3.3 m window at 70 ft, covers every pitch.
+#   At 25 mm the ball is 7 px radius at release (seam-trackable) → 50 px near
+#   plate.  At 50 mm: 14 px at release, extremely clear seams the whole flight.
+#   DO NOT use 5–8 mm: ball is 1–2 px at 70 ft and cannot be detected.
+#
+# HITTING (camera 10 ft behind plate, ball starts at plate and travels away):
+#   Use 8–15 mm for a wide enough view to follow the batted ball.
+LENS_FOCAL_MM         = 25.0   # minimum for full-flight pitching seam tracking
+LENS_FOCAL_MM_HITTING = 8.0    # wider for batted ball departure tracking
+
 # ── Ball detection ────────────────────────────────────────────────────────────
-BALL_MIN_RADIUS_PX = 4
-BALL_MAX_RADIUS_PX = 30
-MOG2_HISTORY       = 200
-MOG2_THRESHOLD     = 16
+# Pitching mode: at 60 ft with a ~25–50 mm lens the ball is ≈2–4 px radius;
+# setting min to 2 lets the trajectory fitter capture the full flight.
+# Seam tracking needs radius ≥ BALL_MIN_RADIUS_SEAM_PX to resolve features —
+# below that the frame still feeds the trajectory but skips the spin step.
+BALL_MIN_RADIUS_PX      = 2   # trajectory detection — catch ball at 70 ft (pitching)
+BALL_MAX_RADIUS_PX      = 80  # ball at ~10 ft from camera is 50–70 px at 25–35 mm lens
+BALL_MIN_RADIUS_SEAM_PX = 6   # minimum radius for reliable seam phase-correlation
+MOG2_HISTORY            = 200
+MOG2_THRESHOLD          = 16
 
 # ── Audio trigger ─────────────────────────────────────────────────────────────
 AUDIO_DEVICE_INDEX  = None   # None = system default mic
@@ -98,50 +258,42 @@ AUDIO_DEBOUNCE_S    = 0.6
 
 # ── Frame buffer ──────────────────────────────────────────────────────────────
 BUFFER_DURATION_S = 2.0   # total rolling window kept in RAM
-HALF_WINDOW_S     = 0.5   # ±window around trigger that gets processed
+HALF_WINDOW_S     = 0.7   # ±window around trigger; 0.7 s covers a 70 mph pitch (≈0.58 s flight)
 
 # ── Physics ───────────────────────────────────────────────────────────────────
-GRAVITY_M_S2       = 9.81
-AIR_DENSITY        = 1.225
-BALL_MASS_KG       = 0.1417
-BALL_DIAMETER_M    = 0.0737
-DRAG_COEFF         = 0.35
+GRAVITY_M_S2    = 9.81
+AIR_DENSITY     = 1.225
+BALL_MASS_KG    = 0.1417
+BALL_DIAMETER_M = 0.0737
+BALL_RADIUS_M   = BALL_DIAMETER_M / 2
+DRAG_COEFF      = 0.35
+
+# Magnus lift coefficient model: CL = MAGNUS_CL_CONST + MAGNUS_CL_SLOPE × S
+# where S = r·ω/v (spin parameter). Fit to baseball wind-tunnel data (Nathan 2012).
+# Used to invert Magnus acceleration magnitude → spin rate.
+MAGNUS_CL_CONST = 0.09
+MAGNUS_CL_SLOPE = 0.60
 
 # ── Radar (OmniPreSense OPS243-C-FC-RP) ──────────────────────────────────────
 # Single USB-serial port — plug the USB cable into any NUC USB-A port.
 # Linux: usually /dev/ttyACM0 (check: ls /dev/ttyACM*)
 # Windows: check Device Manager → Ports (COM & LPT)
 OPS243_ENABLED       = True
-OPS243_PORT          = '/dev/ttyACM0'
+OPS243_PORT          = _OPS243_PORT_DEFAULT
 OPS243_BAUD          = 9600
-OPS243_MIN_PITCH_MPS = 13.4   # ~30 mph inbound — slower = ignore (noise / wind)
-OPS243_MIN_EV_MPS    = 17.9   # ~40 mph outbound — slower = ignore (bunts / foul tips)
+OPS243_MIN_PITCH_MPS = 15.65  # ~35 mph inbound — slower = ignore (noise / wind)
+OPS243_MIN_EV_MPS    = 15.65  # ~35 mph outbound — slower = ignore (bunts / foul tips)
 OPS243_AGREE_FRACTION = 0.15  # EV agreement threshold vs. camera (15%)
 
-# ── Vision trigger (camera-only stand-in for radar) ───────────────────────────
-# Continuously runs the same MOG2 + HoughCircles detector as detect.py on
-# camera 0 and fires the same buffer.trigger() path as the mic/radar — catches
-# a ball the moment it enters the frame (e.g. cameras facing out over the
-# field) without needing the crack sound or the IWR6843 board wired up.
-# Meant as a stopgap until radar is connected: --radar is more robust once
-# available (a person or bat passing through frame can register here as a
-# "ball"; radar only fires on objects actually moving at pitch/exit speed).
-VISION_TRIGGER_ENABLED    = False
-VISION_TRIGGER_EVERY_NTH  = 4      # run detection on 1 of every N live frames
-VISION_TRIGGER_DEBOUNCE_S = 0.6    # matches AUDIO_DEBOUNCE_S
-
-# ── Radar (TI IWR6843ISK) ─────────────────────────────────────────────────────
-# On Windows the board registers as two COM ports after the USB driver installs.
-# Check Device Manager → Ports (COM & LPT) — typically two consecutive ports.
-RADAR_ENABLED               = False
-RADAR_CONFIG_PORT           = 'COM3'
-RADAR_DATA_PORT             = 'COM4'
-RADAR_CONFIG_BAUD           = 115200
-RADAR_DATA_BAUD             = 921600
-RADAR_CONFIG_FILE           = 'radar_config.cfg'
-RADAR_TRIGGER_VELOCITY_MPS  = 13.4   # ~30 mph — any faster object fires the trigger
-RADAR_MIN_SNR_DB            = 10.0
-RADAR_AGREE_FRACTION        = 0.15
+# ── Measurement validity gates (post-fit) ─────────────────────────────────────
+# A trigger fires the pipeline; the pipeline only BROADCASTS a measurement
+# when the resulting fit looks physically like a real ball flight. Anything
+# rejected here just bumps the system back to ARMED without a metric.
+MEAS_MIN_EV_MPH         = 40.0   # below this is almost certainly tracking noise
+MEAS_MAX_EV_MPH         = 130.0  # above this is unphysical (MLB record ≈ 122 mph)
+MEAS_MAX_RESIDUAL_MM    = 50.0   # ballistic fit RMS — > 50 mm means it wasn't a coherent flight
+MEAS_MIN_POINTS_USED    = 8      # fewer inlier points → fit is too uncertain
+MEAS_MIN_DETECT_RATE    = 0.40   # ball lost too often → tracking blob, not ball
 
 # ── WebSocket server ──────────────────────────────────────────────────────────
 WS_HOST = "0.0.0.0"
@@ -164,16 +316,30 @@ PLATE_MODEL_FILE    = "plate_keypoints.pt"   # trained weights (optional)
 # Intrinsics are derived from the lens + sensor because a single planar view
 # can't recover them reliably. Set these to match your camera/lens; the focal
 # length can optionally be refined from the plate homography (--refine-focal).
-SENSOR_PIXEL_PITCH_UM = 3.0         # OV9281 native pixel size
-SENSOR_NATIVE_WIDTH   = 1280        # native sensor width (modes bin down from this)
-LENS_FOCAL_MM         = 8.0         # set to your 5–50 mm lens's actual focal length
+SENSOR_PIXEL_PITCH_UM = 3.0    # OV9281 native pixel size
+SENSOR_NATIVE_WIDTH   = 1280   # native sensor width (modes bin down from this)
 
-def focal_px(width: int = None) -> float:
-    """Approx focal length in pixels for the current capture width, assuming the
-    sub-1280 modes are 2×2-binned (so effective pixel pitch scales with width)."""
-    w = width if width is not None else WIDTH
-    native_fx = LENS_FOCAL_MM * 1000.0 / SENSOR_PIXEL_PITCH_UM
+def focal_px(focal_mm: float = None, width: int = None) -> float:
+    """Approx focal length in pixels for the given focal length and capture width.
+    Sub-1280 modes are 2×2-binned so effective pixel pitch scales with width."""
+    f = focal_mm if focal_mm is not None else LENS_FOCAL_MM
+    w = width    if width    is not None else WIDTH
+    native_fx = f * 1000.0 / SENSOR_PIXEL_PITCH_UM
     return native_fx * (w / SENSOR_NATIVE_WIDTH)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-CALIBRATION_FILE = "calibration.npz"
+# CALIBRATION_FILE is the *active* calibration the tracking pipeline reads.
+# Per-mode files preserve a Hitting and a Pitching calibration so the user can
+# physically reposition the cameras between modes without losing the other one.
+# Switching sessions in the UI copies the mode-specific file over CALIBRATION_FILE
+# and triggers pipeline.reload_calibration().
+CALIBRATION_FILE          = "calibration.npz"
+CALIBRATION_FILE_HITTING  = "calibration_hitting.npz"
+CALIBRATION_FILE_PITCHING = "calibration_pitching.npz"
+
+
+def calibration_path_for(mode: str) -> str:
+    """Return the per-mode calibration file path. Defaults to the hitting file."""
+    if mode == "pitching":
+        return CALIBRATION_FILE_PITCHING
+    return CALIBRATION_FILE_HITTING

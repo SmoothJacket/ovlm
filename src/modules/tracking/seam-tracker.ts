@@ -149,6 +149,8 @@ export class SeamTracker {
       spinEfficiency: 0.7, // placeholder — true efficiency requires 3D seam reconstruction
       seamFrames: confident.map((f) => f.frameIndex),
       confidence: confident.length / this.seamHistory.length,
+      gyroDeg: 0,
+      axisConfidence: 1,
     };
   }
 

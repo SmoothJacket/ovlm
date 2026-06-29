@@ -22,20 +22,43 @@ export type PiMessage =
         efficiency: number;
         confidence: number;
         framesUsed: number;
-        /** Which camera measured spin: dedicated high-fps cam or stereo cam 0 */
-        source?: 'spincam' | 'stereo';
+        source?: 'spincam' | 'stereo' | 'axis-corrected' | 'magnus';
+        gyroDeg?: number;
+        axisConfidence?: number;
       };
       evSource: 'camera' | 'radar';
       radarVelocityMps: number | null;
       pitchVelocity:    number | null;   // mph — OPS243 inbound reading (pitch speed)
-      carryDistanceM:   number | null;   // metres — OPS243 FMCW range at peak distance
+      carryDistanceM:   number | null;   // metres — OPS243 FMCW range when present, else ballistic fit from stereo trajectory
       trajectory: Array<{ x: number; y: number; z: number; t: number }>;
+      /** Trackman-style pitch metrics, present only when the trajectory was
+       *  a pitch (ball travelling toward the plate). */
+      pitch?: {
+        release_speed_mph:   number;
+        plate_speed_mph:     number;
+        plate_time_s:        number;
+        plate_loc_x_ft:      number;
+        plate_loc_y_ft:      number;
+        release_height_ft:   number;
+        release_side_ft:     number;
+        extension_ft:        number;
+        vertical_break_in:   number;
+        horizontal_break_in: number;
+        total_break_in:      number;
+        vaa_deg:             number;
+        haa_deg:             number;
+        spin_rate_rpm:       number | null;
+        spin_tilt:           string | null;
+        active_spin_pct:     number | null;
+      };
     }
   | { type: 'audio_level'; rms: number; peak: number; threshold: number }
-  | { type: 'health'; cpuTempC: number; memUsedMb: number; memTotalMb: number; loadAvg1m: number }
+  | { type: 'health'; cpuTempC: number; memUsedMb: number; memTotalMb: number; loadAvg1m: number;
+      cam0Fps?: number; cam1Fps?: number; }
   | {
       type: 'calibration';
       state: 'collecting' | 'done' | 'error';
+      mode?: 'hitting' | 'pitching';   // backend echoes which mode this result is for
       progress?: number;
       total?: number;
       baselineMm?: number;
@@ -47,12 +70,28 @@ export type PiMessage =
   | { type: 'calib_frame'; cam0: string; cam1: string;
       cornersFound: [boolean, boolean]; step: 'align' | 'capturing' | 'done' }
   | { type: 'calib_result'; ok: boolean; reprojPx: number;
-      residualMm: number; baselineMm: number; message: string };
+      residualMm: number; baselineMm: number; message: string }
+  | { type: 'session_mode'; mode: 'hitting' | 'pitching'; calibrated: boolean }
+  | { type: 'radar_status';
+      pitchMph: number | null;
+      evMph:    number | null;
+      rangeM:   number | null;
+    };
 
 /** Messages the browser sends to the launch-monitor backend */
 export type BrowserMessage =
   | { type: 'arm' }
   | { type: 'disarm' }
   | { type: 'reset' }
+  | { type: 'trigger' }   // manual capture — fires the buffer flush at "now"
   | { type: 'set_threshold'; value: number }
-  | { type: 'calibrate' };
+  | { type: 'calibrate'; mode?: 'hitting' | 'pitching' }
+  | {
+      type: 'calib_manual';
+      corners0: [number, number][];
+      corners1: [number, number][];
+      heightMm: number;
+      distanceMm: number;
+      mode?: 'hitting' | 'pitching';
+    }
+  | { type: 'set_session_mode'; mode: 'hitting' | 'pitching' };

@@ -132,7 +132,7 @@ input[type=number] { width: 70px; padding: 2px 6px; }
 <body class="bg-slate-900 text-slate-100 h-screen flex">
 
 <!-- LEFT PANEL -->
-<div class="flex flex-col w-[330px] min-w-[310px] h-screen overflow-y-auto bg-slate-900 border-r border-slate-800 p-4">
+<div id="leftPanel" class="flex flex-col w-[330px] min-w-[310px] h-screen overflow-y-auto bg-slate-900 border-r border-slate-800 p-4" style="transition:width 0.22s ease,min-width 0.22s ease,padding 0.22s ease,opacity 0.18s ease">
 
   <div class="sec">
     <div id="appHeader" class="rounded-lg px-3 py-2.5 relative overflow-hidden"
@@ -208,6 +208,40 @@ input[type=number] { width: 70px; padding: 2px 6px; }
       <option value="u8">7–8u Coach Pitch — 38% field</option>
     </select>
     <div class="text-slate-600 text-xs" id="fsInfo"></div>
+  </div>
+
+  <!-- Environment -->
+  <div class="sec flex flex-col gap-2">
+    <div class="row">
+      <div class="text-xs text-slate-400 tracking-widest">ENVIRONMENT</div>
+      <span id="envDensChip" class="text-xs font-mono text-slate-500">+0% air</span>
+    </div>
+    <div class="flex gap-2 items-center">
+      <span class="text-xs text-slate-400" style="width:58px;flex-shrink:0">Altitude</span>
+      <input type="range" id="envAlt" min="0" max="6000" value="0" step="50" style="flex:1"/>
+      <span class="text-sky-400 text-xs font-mono" style="width:56px;text-align:right"><span id="envAltVal">0</span> ft</span>
+    </div>
+    <div class="flex gap-2 items-center">
+      <span class="text-xs text-slate-400" style="width:58px;flex-shrink:0">Temp</span>
+      <input type="range" id="envTemp" min="20" max="110" value="72" step="1" style="flex:1"/>
+      <span class="text-sky-400 text-xs font-mono" style="width:56px;text-align:right"><span id="envTempVal">72</span> °F</span>
+    </div>
+    <div class="flex gap-2 items-center">
+      <span class="text-xs text-slate-400" style="width:58px;flex-shrink:0">Wind</span>
+      <input type="range" id="envWind" min="0" max="30" value="0" step="1" style="flex:1"/>
+      <span class="text-sky-400 text-xs font-mono" style="width:56px;text-align:right"><span id="envWindVal">0</span> mph</span>
+    </div>
+    <div class="flex gap-2 items-center">
+      <span class="text-xs text-slate-400" style="width:58px;flex-shrink:0">Direction</span>
+      <select id="envWindDir" class="pl-input" style="flex:1;font-size:11px">
+        <option value="180">⬆ Out to CF</option>
+        <option value="0">⬇ In from CF</option>
+        <option value="270">→ From LF</option>
+        <option value="90">← From RF</option>
+        <option value="225">↖ Out to LF</option>
+        <option value="135">↗ Out to RF</option>
+      </select>
+    </div>
   </div>
 
   <!-- Mode Toggle -->
@@ -573,6 +607,15 @@ input[type=number] { width: 70px; padding: 2px 6px; }
 
 <!-- RIGHT CANVAS -->
 <div id="canvasWrap" class="flex-1 h-screen relative">
+  <button id="sidebarToggle" onclick="toggleSidebar()" title="Toggle controls panel"
+    style="position:absolute;top:12px;left:12px;z-index:50;width:28px;height:28px;
+           display:flex;align-items:center;justify-content:center;
+           background:rgba(15,23,42,0.82);border:1px solid #334155;border-radius:6px;
+           color:#94a3b8;font-size:14px;cursor:pointer;line-height:1;
+           transition:background 0.15s,color 0.15s"
+    onmouseenter="this.style.background='rgba(30,41,59,0.95)';this.style.color='#e2e8f0'"
+    onmouseleave="this.style.background='rgba(15,23,42,0.82)';this.style.color='#94a3b8'"
+  >&#8942;</button>
   <div id="overlay">
     <div class="spinner"></div>
     <div class="text-sky-400 text-sm tracking-widest">MLB STADIUM SIMULATOR</div>
@@ -660,9 +703,14 @@ import { LineGeometry }  from 'three/addons/lines/LineGeometry.js';
 const MODEL_SCALE = 3.28;   // meters -> feet for all GLB models
 const GRAVITY     = 32.2;   // ft/s^2
 const MASS        = 0.3125; // lbs
-const RHO         = 0.075;  // lbs/ft^3
+const RHO_SL      = 0.075;  // lbs/ft^3 — sea-level 72 °F reference
 const A_CROSS     = 0.045;  // ft^2
 const CD          = 0.3;
+
+// ── Dynamic environment (mutated by applyEnv) ─────────────────────────────
+let envRho   = RHO_SL; // current air density (altitude + temp)
+let envWindX = 0;      // ft/s — stadium frame: +X = toward RF
+let envWindZ = 0;      // ft/s — +Z = toward home plate (headwind for pitch)
 const FPS_SIM     = 120;
 const TRAIL_MAX   = 1200;
 const LAUNCH_YAW  = -Math.PI / 2; // CF along -Z axis
@@ -1427,14 +1475,6 @@ fieldOverlayGroup.add(diamondGroup);
 const D = 63.64;
 const basePts = [[0,0],[D,-D],[0,-D*2],[-D,-D],[0,0]];
 linePts(basePts, 0x9db5c8, 0.35, diamondGroup);  // soft blue-white, reduced opacity
-[[D,-D],[0,-D*2],[-D,-D]].forEach(([x,z]) => {
-  const pad = new THREE.Mesh(
-    new THREE.BoxGeometry(1.5,0.15,1.5),
-    new THREE.MeshStandardMaterial({ color:0xddeeff, emissive:0x334455, emissiveIntensity:0.4 })
-  );
-  pad.position.set(x, 0.1, z);
-  diamondGroup.add(pad);
-});
 
 // Home plate
 const ps = new THREE.Shape();
@@ -1505,8 +1545,6 @@ const originRingMesh = new THREE.Mesh(
 originRingMesh.rotation.x = -Math.PI/2; originRingMesh.position.y = 0.08;
 fieldOverlayGroup.add(originRingMesh);
 
-// Axes helper
-fieldOverlayGroup.add(new THREE.AxesHelper(25));
 
 // ── BALL ─────────────────────────────────────────────────────────────────────
 const ball = new THREE.Mesh(
@@ -1601,6 +1639,97 @@ function tracerPush(x, y, z) {
   tracerGeo.attributes.position.needsUpdate = true;
   tracerGeo.setDrawRange(0, tracerN);
 }
+
+// ── MEASURED 3-D PROJECTION (from OVLM stereo triangulation) ─────────────────
+// When an external hit arrives with a `trajectory` array (3-D world-frame
+// points captured by the cameras), draw the *real* ball flight as a cyan
+// polyline plus dot-per-sample markers, anchored to home plate in the
+// stadium. Sits on top of the simulator's own physics trail so the operator
+// can see both: orange = simulated reproduction, cyan = measured truth.
+//
+// OVLM world frame → stadium frame:
+//   OVLM is in metres with +X = first base, +Y = up, +Z = toward pitcher.
+//   Stadium is in feet with +X = first base, +Y = up, −Z = toward pitcher
+//   (LAUNCH_YAW rotates the contact frame so CF sits at −Z).
+const MEAS_M2FT = 3.2808;
+const measGeo = new LineGeometry();
+measGeo.setPositions([0,0,0, 0,0.01,0]);
+const measMat = new LineMaterial({
+  color: 0x00eaff, linewidth: 4,
+  transparent: true, opacity: 0.95,
+  resolution: new THREE.Vector2(W(), H()),
+  depthTest: false,
+});
+const measLine = new Line2(measGeo, measMat);
+measLine.computeLineDistances();
+measLine.visible = false;
+measLine.renderOrder = 5;
+scene.add(measLine);
+
+const measGlowMat = new LineMaterial({
+  color: 0x88ffff, linewidth: 12,
+  transparent: true, opacity: 0.25,
+  blending: THREE.AdditiveBlending,
+  resolution: new THREE.Vector2(W(), H()),
+  depthTest: false,
+});
+const measGlow = new Line2(measGeo, measGlowMat);
+measGlow.computeLineDistances();
+measGlow.visible = false;
+measGlow.renderOrder = 4;
+scene.add(measGlow);
+
+const measDotsGeo = new THREE.BufferGeometry();
+measDotsGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+const measDotsMat = new THREE.PointsMaterial({
+  color: 0xaaffff, size: 4.0, sizeAttenuation: true,
+  transparent: true, opacity: 1.0,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false, depthTest: false,
+});
+const measDots = new THREE.Points(measDotsGeo, measDotsMat);
+measDots.visible = false;
+measDots.renderOrder = 6;
+scene.add(measDots);
+
+function clearMeasuredTrajectory() {
+  measLine.visible = false;
+  measGlow.visible = false;
+  measDots.visible = false;
+}
+
+function showMeasuredTrajectory(pts) {
+  if (!Array.isArray(pts) || pts.length < 2) {
+    clearMeasuredTrajectory();
+    return;
+  }
+  const flat = new Float32Array(pts.length * 3);
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const x = +p[0], y = +p[1], z = +p[2];
+    if (!isFinite(x) || !isFinite(y) || !isFinite(z)) {
+      clearMeasuredTrajectory();
+      return;
+    }
+    flat[i*3    ] =  x * MEAS_M2FT;
+    flat[i*3 + 1] =  y * MEAS_M2FT;
+    flat[i*3 + 2] = -z * MEAS_M2FT;   // OVLM +Z (toward pitcher) → stadium −Z
+  }
+  measGeo.setPositions(flat);
+  measLine.computeLineDistances();
+  measGlow.computeLineDistances();
+  measDotsGeo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+  measDotsGeo.attributes.position.needsUpdate = true;
+  measLine.visible = true;
+  measGlow.visible = true;
+  measDots.visible = true;
+}
+
+// Keep Line2 resolution in sync with viewport so the linewidth stays crisp.
+window.addEventListener('resize', () => {
+  measMat.resolution.set(W(), H());
+  measGlowMat.resolution.set(W(), H());
+});
 
 // ── LANDING MARKER ────────────────────────────────────────────────────────────
 const landGroup = new THREE.Group(); scene.add(landGroup);
@@ -3304,17 +3433,105 @@ function applyExternalHit(m) {
   setSlider('sprayAngle',   'saVal', sa, -45, 45);
   setSlider('backspin',     'bsVal', bs, -1000, 4000);
   setSlider('sidespin',     'ssVal', ss, -2500, 2500);
+  // Cyan polyline of the actual measured 3-D points, if the launch monitor
+  // sent them. Drawn alongside the orange simulated trail.
+  showMeasuredTrajectory(m.trajectory);
   launch();
   return true;
 }
 window.simulateHit = applyExternalHit;
 
+// Inverse of tiltToClock: "HH:MM" clock string → degrees (0 = 12:00, CW)
+function clockToTiltDeg(clock) {
+  if (!clock || typeof clock !== 'string' || !clock.includes(':')) return 0;
+  const parts = clock.split(':');
+  const h = parseInt(parts[0], 10) % 12;
+  const m = parseInt(parts[1], 10);
+  return (h * 60 + m) * 0.5;   // 720 minutes per revolution → 0.5 deg/min
+}
+
+// Apply a measured pitch from the OVLM pipeline.
+// Switches to pitch mode, sets all sliders, fires the sim, then injects
+// the measured plate metrics into the display (overriding the sim's own
+// physics output, which uses a simplified model).
+function applyExternalPitch(m) {
+  if (!m || typeof m !== 'object') return false;
+  const velo = parseFloat(m.releaseSpeedMph);
+  if (!isFinite(velo)) return false;
+  if (!extReady) { extQueue.push(m); return true; }
+
+  if (appMode !== 'pitch') setMode('pitch');
+
+  const setRange = (id, dispId, v, lo, hi) => {
+    const el = document.getElementById(id); if (!el) return;
+    const c = Math.min(hi, Math.max(lo, Math.round(v)));
+    el.value = c;
+    const d = document.getElementById(dispId); if (d) d.textContent = c;
+  };
+  const setRangeF = (id, dispId, v, lo, hi) => {
+    const el = document.getElementById(id); if (!el) return;
+    const c = Math.min(hi, Math.max(lo, parseFloat(v) || 0));
+    el.value = c;
+    const d = document.getElementById(dispId); if (d) d.textContent = c.toFixed(1);
+  };
+
+  setRange('pitchVelo', 'pitchVeloVal', velo, 60, 102);
+  setRange('pitchSpin', 'pitchSpinVal', m.spinRateRpm ?? 2300, 800, 3600);
+
+  const tiltDeg = clockToTiltDeg(m.spinTilt);
+  const tiltEl  = document.getElementById('pitchTilt');
+  if (tiltEl) {
+    tiltEl.value = Math.round(tiltDeg);
+    const tiltD = document.getElementById('pitchTiltDisp');
+    if (tiltD) tiltD.textContent = tiltToClock(Math.round(tiltDeg));
+  }
+
+  setRange('pitchGyro',   'pitchGyroVal',   m.gyroPct ?? 0,            0,  80);
+  setRangeF('pitchVAngle','pitchVAngleVal', -(Math.abs(m.vaaDeg) || 2), -8, 0);
+  setRangeF('pitchHAngle','pitchHAngleVal',  m.haaDeg ?? 0,             -5, 5);
+
+  const setInput = (id, v) => {
+    const el = document.getElementById(id);
+    if (el && v != null) el.value = parseFloat(v).toFixed(2);
+  };
+  setInput('relHeight', m.releaseHeightFt);
+  setInput('relSide',   m.releaseSideFt);
+  setInput('relExt',    m.extensionFt);
+
+  launchPitch();
+
+  // Inject OVLM's measured values ~800 ms after launch (sim finishes in <500 ms).
+  if (m.plateSpeedMph != null) {
+    setTimeout(() => {
+      const setText = (id, val) => {
+        const el = document.getElementById(id); if (el && val != null) el.textContent = val;
+      };
+      setText('pm_velo',   m.plateSpeedMph?.toFixed(1));
+      setText('pm_height', m.plateLocYFt?.toFixed(2));
+      setText('pm_side',   m.plateLocXFt  != null ? (m.plateLocXFt * 12).toFixed(1) : null);
+      setText('pm_hbreak', m.horizontalBreakIn?.toFixed(1));
+      setText('pm_ivb',    m.verticalBreakIn?.toFixed(1));
+      setText('pm_vaa',    m.vaaDeg?.toFixed(1));
+      setText('pm_time',   m.plateTimeS?.toFixed(3));
+    }, 800);
+  }
+
+  return true;
+}
+window.simulatePitch = applyExternalPitch;
+
 window.addEventListener('message', e => {
-  if (e.data && e.data.type === 'ovlm:hit') applyExternalHit(e.data);
+  if (!e.data) return;
+  if (e.data.type === 'ovlm:hit')   applyExternalHit(e.data);
+  if (e.data.type === 'ovlm:pitch') applyExternalPitch(e.data);
 });
 try {
   const extBC = new BroadcastChannel('ovlm-sim');
-  extBC.onmessage = e => { if (e.data && e.data.type === 'ovlm:hit') applyExternalHit(e.data); };
+  extBC.onmessage = e => {
+    if (!e.data) return;
+    if (e.data.type === 'ovlm:hit')   applyExternalHit(e.data);
+    if (e.data.type === 'ovlm:pitch') applyExternalPitch(e.data);
+  };
 } catch(e) {}
 
 // Called once all stadiums are loaded: flush queue, answer URL params,
@@ -3324,16 +3541,42 @@ function externalApiReady() {
   const qp = new URLSearchParams(location.search);
   if (qp.has('ev') && qp.has('la')) {
     extQueue.push({
+      type: 'ovlm:hit',
       ev: qp.get('ev'), la: qp.get('la'), spray: qp.get('spray'),
       backspin: qp.get('backspin'), sidespin: qp.get('sidespin'),
     });
   }
   const q = extQueue.splice(0);
-  q.forEach(m => applyExternalHit(m));
+  q.forEach(m => m && m.type === 'ovlm:pitch' ? applyExternalPitch(m) : applyExternalHit(m));
   [window.opener, window.parent !== window ? window.parent : null].forEach(w => {
     if (w) { try { w.postMessage({ type: 'ovlm:sim-ready' }, '*'); } catch(e) {} }
   });
 }
+
+// ── SIDEBAR TOGGLE ───────────────────────────────────────────────────────────
+let sidebarOpen = true;
+window.toggleSidebar = function toggleSidebar() {
+  const panel = document.getElementById('leftPanel');
+  const btn   = document.getElementById('sidebarToggle');
+  sidebarOpen = !sidebarOpen;
+  if (sidebarOpen) {
+    panel.style.width    = '';
+    panel.style.minWidth = '';
+    panel.style.padding  = '';
+    panel.style.opacity  = '';
+    panel.style.overflow = '';
+    btn.innerHTML = '&#8942;';
+  } else {
+    panel.style.width    = '0';
+    panel.style.minWidth = '0';
+    panel.style.padding  = '0';
+    panel.style.opacity  = '0';
+    panel.style.overflow = 'hidden';
+    btn.innerHTML = '&#9776;';
+  }
+  // Give the renderer a moment to pick up the new canvas size.
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 240);
+};
 
 // ── PHYSICS ──────────────────────────────────────────────────────────────────
 const WALL_HEIGHT   = 8;    // ft — typical MLB fence height
@@ -3804,18 +4047,23 @@ function updateBall() {
   const sp = simVel.length();
   if (sp < 0.001) { simActive = false; return; }
 
-  // Aerodynamic drag
-  const drag = 0.5 * CD * RHO * A_CROSS * sp * sp / MASS;
+  // Apparent velocity relative to wind — aerodynamics act on this
+  const vax = simVel.x - envWindX;
+  const vaz = simVel.z - envWindZ;
+  const sp_a = Math.sqrt(vax*vax + simVel.y*simVel.y + vaz*vaz) || 0.001;
+
+  // Aerodynamic drag (direction of -v_apparent)
+  const drag = 0.5 * CD * envRho * A_CROSS * sp_a * sp_a / MASS;
 
   // Magnus from batted-ball spin — same CL model as pitch mode, scaled so
   // 1800 rpm backspin adds ~35 ft of carry (Statcast-realistic, not +85 ft)
   let mAx = 0, mAy = 0, mAz = 0;
   if (hitSpinW > 1) {
     const HIT_SPIN_EFF = 0.45;
-    const S   = hitSpinW * BALL_RADIUS / sp;
+    const S   = hitSpinW * BALL_RADIUS / sp_a;
     const CL  = 1 / (2.32 + 0.4 / S);
-    const mag = HIT_SPIN_EFF * CL * RHO * A_CROSS * sp * sp / (2 * MASS);
-    const vhx = simVel.x / sp, vhy = simVel.y / sp, vhz = simVel.z / sp;
+    const mag = HIT_SPIN_EFF * CL * envRho * A_CROSS * sp_a * sp_a / (2 * MASS);
+    const vhx = vax / sp_a, vhy = simVel.y / sp_a, vhz = vaz / sp_a;
     mAx = mag * (hitSpinHat.y * vhz - hitSpinHat.z * vhy);
     mAy = mag * (hitSpinHat.z * vhx - hitSpinHat.x * vhz);
     mAz = mag * (hitSpinHat.x * vhy - hitSpinHat.y * vhx);
@@ -3823,9 +4071,9 @@ function updateBall() {
 
   // Tentative next velocity (Euler integration)
   const nv = new THREE.Vector3(
-    simVel.x + (-drag * simVel.x / sp + mAx) * simDt,
-    simVel.y + (-GRAVITY - drag * simVel.y / sp + mAy) * simDt,
-    simVel.z + (-drag * simVel.z / sp + mAz) * simDt
+    simVel.x + (-drag * vax / sp_a + mAx) * simDt,
+    simVel.y + (-GRAVITY - drag * simVel.y / sp_a + mAy) * simDt,
+    simVel.z + (-drag * vaz / sp_a + mAz) * simDt
   );
   // Tentative next position
   const np = simPos.clone().addScaledVector(nv, simDt);
@@ -3920,9 +4168,10 @@ function tiltToClock(deg) {
 function computeNoSpin(px,py,pz,vx,vy,vz) {
   let t=0;
   while (pz < 0 && py > 0 && t < 2.5) {
-    const sp = Math.sqrt(vx*vx+vy*vy+vz*vz);
-    const d  = 0.5*CD*RHO*A_CROSS*sp*sp/MASS;
-    vx += (-d*vx/sp)*simDt; vy += (-GRAVITY-d*vy/sp)*simDt; vz += (-d*vz/sp)*simDt;
+    const vax = vx - envWindX, vaz = vz - envWindZ;
+    const sp = Math.sqrt(vax*vax+vy*vy+vaz*vaz) || 0.001;
+    const d  = 0.5*CD*envRho*A_CROSS*sp*sp/MASS;
+    vx += (-d*vax/sp)*simDt; vy += (-GRAVITY-d*vy/sp)*simDt; vz += (-d*vaz/sp)*simDt;
     px += vx*simDt; py += vy*simDt; pz += vz*simDt; t += simDt;
   }
   return { x:px, y:py };
@@ -3989,18 +4238,23 @@ function stepPitchPhysics() {
   const sp = pitchVel.length();
   if (sp < 0.1) { pitchActive=false; return; }
 
-  // Drag
-  const drag = 0.5*CD*RHO*A_CROSS*sp*sp/MASS;
+  // Apparent velocity relative to wind
+  const vax = pitchVel.x - envWindX;
+  const vaz = pitchVel.z - envWindZ;
+  const sp_a = Math.sqrt(vax*vax + pitchVel.y*pitchVel.y + vaz*vaz) || 0.1;
 
-  // Magnus: CL via spin parameter S = ω_eff * r / v
-  const S  = (pitchOmega * BALL_RADIUS) / sp;
+  // Drag (acts along apparent velocity)
+  const drag = 0.5*CD*envRho*A_CROSS*sp_a*sp_a/MASS;
+
+  // Magnus: CL via spin parameter S = ω_eff * r / v_apparent
+  const S  = (pitchOmega * BALL_RADIUS) / sp_a;
   const CL = S > 0.001 ? 1/(2.32 + 0.4/S) : 0;
-  const magnusAcc = CL*RHO*A_CROSS*sp*sp/(2*MASS);
+  const magnusAcc = CL*envRho*A_CROSS*sp_a*sp_a/(2*MASS);
 
-  // Cross product: spinAxis × vHat  (spinAxis.z=0)
-  const vhx = pitchVel.x/sp, vhy = pitchVel.y/sp, vhz = pitchVel.z/sp;
-  const cx =  pitchSpinAY*vhz;              // ay*vz - 0*vy
-  const cy = -pitchSpinAX*vhz;             // 0*vx  - ax*vz
+  // Cross product: spinAxis × vHat_apparent  (spinAxis.z=0)
+  const vhx = vax/sp_a, vhy = pitchVel.y/sp_a, vhz = vaz/sp_a;
+  const cx =  pitchSpinAY*vhz;
+  const cy = -pitchSpinAX*vhz;
   const cz =  pitchSpinAX*vhy - pitchSpinAY*vhx;
 
   pitchVel.x += (-drag*vhx + magnusAcc*cx)*simDt;
@@ -4209,7 +4463,66 @@ document.getElementById('pitchType').addEventListener('change', function() {
 document.getElementById('applyCalBtn')      .addEventListener('click', applyCalibration);
 document.getElementById('saveHomePlateBtn') .addEventListener('click', saveHomePlate);
 document.getElementById('resetCalBtn')      .addEventListener('click', resetCalibration);
-document.getElementById('stadiumSelect').addEventListener('change', e => switchStadium(e.target.value));
+// ── ENVIRONMENT ──────────────────────────────────────────────────────────────
+// Real MLB stadium elevations (ft) and typical game-day temperatures (°F).
+// Indoors/dome stadiums use controlled-air defaults.
+const STADIUM_ENV_DEFAULTS = {
+  'Stadium_COL.glb': { alt: 5280, temp: 65 },  // Denver — Coors effect
+  'Stadium_ARI.glb': { alt: 1090, temp: 74 },  // Chase Field (retractable roof)
+  'Stadium_LAD.glb': { alt:  510, temp: 72 },  // Chavez Ravine
+  'Stadium_ATL.glb': { alt: 1050, temp: 78 },  // Cumberland GA
+  'Stadium_TEX.glb': { alt:  552, temp: 80 },  // Globe Life (roof)
+  'Stadium_MIN.glb': { alt:  833, temp: 65 },  // Target Field
+  'Stadium_KC.glb':  { alt:  750, temp: 75 },  // Kauffman
+  'Stadium_PIT.glb': { alt:  730, temp: 68 },  // PNC Park
+  'Stadium_DET.glb': { alt:  600, temp: 68 },  // Comerica
+  'Stadium_MIL.glb': { alt:  634, temp: 65 },  // American Family Field
+  'Stadium_CWS.glb': { alt:  594, temp: 70 },  // Guaranteed Rate
+  'Stadium_CHC.glb': { alt:  594, temp: 68 },  // Wrigley
+  'Stadium_CIN.glb': { alt:  489, temp: 72 },  // GABP
+  'Stadium_STL.glb': { alt:  466, temp: 78 },  // Busch
+  'Stadium_TOR.glb': { alt:  249, temp: 68 },  // Rogers Centre (dome)
+  'Stadium_HOU.glb': { alt:   22, temp: 74 },  // Minute Maid (roof)
+  'Stadium_TB.glb':  { alt:    7, temp: 72 },  // Tropicana (dome)
+  'Stadium_MIA.glb': { alt:    6, temp: 85 },  // LoanDepot (retractable roof)
+};
+
+window.applyEnv = function applyEnv() {
+  const altFt    = parseFloat(document.getElementById('envAlt').value)  || 0;
+  const tempF    = parseFloat(document.getElementById('envTemp').value) || 72;
+  const windMph  = parseFloat(document.getElementById('envWind').value) || 0;
+  const fromDeg  = parseFloat(document.getElementById('envWindDir').value) || 0;
+
+  document.getElementById('envAltVal').textContent  = altFt;
+  document.getElementById('envTempVal').textContent = tempF;
+  document.getElementById('envWindVal').textContent = windMph;
+
+  // ISO atmosphere: density scales with pressure (altitude) and temperature
+  envRho = RHO_SL * (531.67 / (tempF + 459.67)) * Math.exp(-altFt / 27890);
+
+  const fromRad = fromDeg * Math.PI / 180;
+  const ws = windMph * 5280 / 3600; // convert to ft/s
+  envWindX = -ws * Math.sin(fromRad); // +X = toward RF
+  envWindZ =  ws * Math.cos(fromRad); // +Z = toward home (headwind for pitch)
+
+  const pct  = ((envRho / RHO_SL - 1) * 100).toFixed(0);
+  const sign = pct >= 0 ? '+' : '';
+  document.getElementById('envDensChip').textContent = sign + pct + '% air';
+};
+
+['envAlt','envTemp','envWind','envWindDir'].forEach(id =>
+  document.getElementById(id).addEventListener('input', applyEnv)
+);
+
+document.getElementById('stadiumSelect').addEventListener('change', e => {
+  switchStadium(e.target.value);
+  const def = STADIUM_ENV_DEFAULTS[e.target.value];
+  if (def) {
+    document.getElementById('envAlt').value  = def.alt;
+    document.getElementById('envTemp').value = def.temp;
+    applyEnv();
+  }
+});
 document.getElementById('fieldScaleSel').value = fieldScaleKey;
 document.getElementById('fieldScaleSel').addEventListener('change', e => applyFieldScale(e.target.value));
 applyFieldScale(fieldScaleKey); // sync diamond + chip before the first stadium loads

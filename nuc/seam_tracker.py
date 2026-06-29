@@ -46,11 +46,13 @@ DOG_SIGMA2     = 3.0    # DoG coarse scale
 
 @dataclass
 class SpinMeasurement:
-    spin_rate_rpm:  float
-    spin_axis:      Tuple[float, float, float]   # 3-D unit vector (world frame)
-    spin_efficiency: float                        # 0–1 proxy for confidence
-    frames_analyzed: int
-    confidence:     float                         # mean phase correlation response
+    spin_rate_rpm:    float
+    spin_axis:        Tuple[float, float, float]   # 3-D unit vector (world frame)
+    spin_efficiency:  float    # active spin fraction 0–1 (transverse / total)
+    frames_analyzed:  int
+    confidence:       float    # mean phase correlation response
+    axis_confidence:  float = 1.0   # 0–1: how reliable is the axis direction
+    gyro_angle_deg:   float = 0.0   # estimated tilt of spin axis toward velocity
 
 
 @dataclass
@@ -145,6 +147,116 @@ class SeamTracker:
             spin_efficiency=round(spin_efficiency, 3),
             frames_analyzed=len(good),
             confidence=round(confidence, 3),
+        )
+
+    def compute_spin_with_axis(
+        self,
+        spin_axis: tuple,
+        cam_los: tuple = (0.0, 0.0, 1.0),
+    ) -> Optional['SpinMeasurement']:
+        """
+        Compute gyro-corrected spin rate using a known 3-D spin axis.
+
+        The camera only sees the component of spin perpendicular to its line
+        of sight (LOS). A slider with 40° gyro angle looks 36% slower than it
+        really is. Dividing by sin(angle between axis and LOS) recovers the
+        true rate.
+
+        Integration over the full flight (total_angle / total_time) is used
+        instead of a per-frame median — a single blurred frame changes the
+        total by at most one frame's contribution, whereas it can dominate
+        a per-frame median.
+
+        Returns None when there are too few samples or the axis is nearly
+        parallel to the LOS (gyro_factor < 0.15, i.e. > ~81° gyro angle),
+        where phase-correlation becomes unreliable and the caller should fall
+        back to the Magnus-only rate.
+        """
+        good = [s for s in self._samples if s.response >= MIN_CONFIDENCE]
+        if len(good) < MIN_FRAMES:
+            return None
+
+        total_angle = sum(s.angle_rad for s in good)
+        total_time  = sum(s.dt        for s in good)
+        if total_time <= 0:
+            return None
+
+        raw_omega = abs(total_angle / total_time)   # rad/s apparent (projected)
+
+        # |sin(θ)| between spin axis and camera LOS = magnitude of cross product
+        ax = np.array(spin_axis, dtype=float)
+        cl = np.array(cam_los,   dtype=float)
+        ax_n = float(np.linalg.norm(ax))
+        cl_n = float(np.linalg.norm(cl))
+        if ax_n < 1e-9 or cl_n < 1e-9:
+            return None
+        gyro_factor = float(np.linalg.norm(np.cross(ax / ax_n, cl / cl_n)))
+
+        if gyro_factor < 0.15:
+            # Axis nearly parallel to camera LOS — near-pure gyro spin.
+            # Seam appears to rotate like a coin face-on; phase correlation
+            # cannot recover the true rate reliably.
+            return None
+
+        true_omega = raw_omega / gyro_factor
+        rpm_active = true_omega * 60.0 / (2.0 * math.pi)
+
+        confidence = float(np.mean([s.response for s in good]))
+
+        # ── Gyro angle estimation from crossing-rate variance ─────────────────
+        # Pure transverse spin → constant frame-to-frame ω (low variance).
+        # A gyro component tilts the spin axis toward/away from the camera
+        # each half revolution, creating sinusoidal modulation in apparent ω.
+        # Empirical approximation: normalised std ≈ sin(gyro_angle) / √2.
+        # gyro_angle: 0° = pure transverse (fastball backspin), 90° = pure gyro.
+        per_frame  = [s.angle_rad / s.dt for s in good]
+        std_v      = float(np.std(per_frame))
+        mean_v_abs = abs(float(np.mean(per_frame)))
+
+        if mean_v_abs > 0:
+            gyro_sin = min(1.0, math.sqrt(2.0) * std_v / (mean_v_abs + 1e-9))
+        else:
+            gyro_sin = 0.0
+
+        # Sign: total_angle > 0 → CCW seen from behind plate (camera at −Z
+        # looking in +Z) → spin axis points toward pitcher (+Z) → LHP-style
+        # gyro is negative.  CW (total_angle < 0) → RHP-style → positive.
+        gyro_sign = -1.0 if total_angle > 0 else 1.0
+
+        # gyro_angle: −90 to +90°; 0 = pure transverse, ±90 = pure gyroball
+        # positive = RHP-style (axis toward plate), negative = LHP-style (+Z)
+        gyro_angle_deg  = gyro_sign * math.degrees(math.asin(gyro_sin))
+        active_fraction = math.sqrt(max(0.0, 1.0 - gyro_sin ** 2))  # cos(|gyro_angle|)
+
+        # Total RPM = active / cos(|gyro_angle|); only when gyro estimate is valid.
+        if active_fraction > 0.30:
+            rpm_total = rpm_active / active_fraction
+        else:
+            rpm_total = rpm_active   # too much gyro — don't amplify noise
+
+        # ── Refine 3D axis: add velocity-direction (gyro) component ──────────
+        # Magnus gives the transverse axis (X-Y plane).
+        # Gyro component: −Z for RHP (toward plate), +Z for LHP (toward pitcher).
+        # axis = cos(|gyro_angle|) · transverse_hat ± sin(|gyro_angle|) · Z_hat
+        trans = np.array(spin_axis, dtype=float)
+        trans[2] = 0.0   # drop any Z in the provided Magnus axis (unmeasured)
+        t_norm = float(np.linalg.norm(trans))
+        if t_norm > 1e-9:
+            trans /= t_norm
+            gyro_dir = np.array([0.0, 0.0, -gyro_sign])  # −Z = RHP, +Z = LHP
+            full = trans * active_fraction + gyro_dir * gyro_sin
+            fn = float(np.linalg.norm(full))
+            refined_axis = tuple(round(float(x), 3) for x in (full / fn if fn > 1e-9 else trans))
+        else:
+            refined_axis = tuple(round(float(x), 3) for x in spin_axis)
+
+        return SpinMeasurement(
+            spin_rate_rpm   = round(rpm_total, 0),
+            spin_axis       = refined_axis,
+            spin_efficiency = round(active_fraction, 3),
+            frames_analyzed = len(good),
+            confidence      = round(confidence, 3),
+            gyro_angle_deg  = round(gyro_angle_deg, 1),
         )
 
     def reset(self) -> None:

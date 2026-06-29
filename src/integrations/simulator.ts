@@ -32,17 +32,46 @@ export interface SimHitPayload {
   sprayAngle: number;
   backspin: number;
   sidespin: number;
+  /** Captured 3-D points in OVLM world frame (metres):
+   *  +X = first base, +Y = up, +Z = toward the pitcher.
+   *  The simulator projects these into its stadium frame and draws them as
+   *  a cyan polyline so the operator can see the actual measured ball path
+   *  on top of the simulated one. */
+  trajectory?: Array<[number, number, number]>;
 }
+
+export interface SimPitchPayload {
+  type: 'ovlm:pitch';
+  releaseSpeedMph: number;
+  plateSpeedMph: number;
+  plateTimeS: number;
+  plateLocXFt: number;
+  plateLocYFt: number;
+  releaseHeightFt: number;
+  releaseSideFt: number;
+  extensionFt: number;
+  verticalBreakIn: number;
+  horizontalBreakIn: number;
+  vaaDeg: number;
+  haaDeg: number;
+  spinRateRpm?: number;
+  spinTilt?: string;
+  /** Percentage of spin that is gyro (0–80); undefined when not measured */
+  gyroPct?: number;
+  trajectory?: Array<[number, number, number]>;
+}
+
+type SimPayload = SimHitPayload | SimPitchPayload;
 
 let simWindow: Window | null = null;
 let simReady = false;
-const queue: SimHitPayload[] = [];
+const queue: SimPayload[] = [];
 
 // Embedded sim (iframe inside the 3D VIEW panel). Same protocol as the popup —
 // the sim posts 'ovlm:sim-ready' to window.parent, hits queue until then.
 let embedWindow: Window | null = null;
 let embedReady = false;
-const embedQueue: SimHitPayload[] = [];
+const embedQueue: SimPayload[] = [];
 
 export function getSimulatorUrl(): string {
   const saved = localStorage.getItem(URL_KEY);
@@ -87,6 +116,9 @@ export function ballToSimPayload(ball: BallMeasurement): SimHitPayload {
     sidespin = Math.round(-transverse * axY);
     backspin = Math.round(transverse * Math.sqrt(Math.max(0, 1 - axY * axY)));
   }
+  const trajectory: SimHitPayload['trajectory'] = ball.trajectory?.length
+    ? ball.trajectory.map((p) => [p.x, p.y, p.z])
+    : undefined;
   return {
     type: 'ovlm:hit',
     exitVelocity: ball.exitVelocity,
@@ -94,6 +126,38 @@ export function ballToSimPayload(ball: BallMeasurement): SimHitPayload {
     sprayAngle: ball.sprayAngle,
     backspin,
     sidespin,
+    trajectory,
+  };
+}
+
+/** Convert a measured pitch into the sim's pitch payload. */
+export function ballToPitchPayload(ball: BallMeasurement): SimPitchPayload {
+  const p = ball.pitch!;
+  const gyroPct =
+    p.activeSpinPct != null
+      ? Math.min(80, Math.round(100 - p.activeSpinPct))
+      : undefined;
+  const trajectory: SimPitchPayload['trajectory'] = ball.trajectory?.length
+    ? ball.trajectory.map((pt) => [pt.x, pt.y, pt.z])
+    : undefined;
+  return {
+    type: 'ovlm:pitch',
+    releaseSpeedMph: p.releaseSpeedMph,
+    plateSpeedMph: p.plateSpeedMph,
+    plateTimeS: p.plateTimeS,
+    plateLocXFt: p.plateLocXFt,
+    plateLocYFt: p.plateLocYFt,
+    releaseHeightFt: p.releaseHeightFt,
+    releaseSideFt: p.releaseSideFt,
+    extensionFt: p.extensionFt,
+    verticalBreakIn: p.verticalBreakIn,
+    horizontalBreakIn: p.horizontalBreakIn,
+    vaaDeg: p.vaaDeg,
+    haaDeg: p.haaDeg,
+    spinRateRpm: p.spinRateRpm ?? undefined,
+    spinTilt: p.spinTilt ?? undefined,
+    gyroPct,
+    trajectory,
   };
 }
 
@@ -122,6 +186,17 @@ export function sendSwingToEmbed(ball: BallMeasurement): void {
   embedWindow.postMessage(payload, '*');
 }
 
+/** Send one pitch to the embedded sim iframe (queues until its ready handshake). */
+export function sendPitchToEmbed(ball: BallMeasurement): void {
+  if (!embedWindow || !ball.pitch) return;
+  const payload = ballToPitchPayload(ball);
+  if (!embedReady) {
+    embedQueue.push(payload);
+    return;
+  }
+  embedWindow.postMessage(payload, '*');
+}
+
 /** Send one swing to the simulator. Opens the sim window if needed
  *  (only works from a user gesture); queues until the ready handshake. */
 export function sendSwingToSimulator(ball: BallMeasurement): void {
@@ -139,9 +214,26 @@ export function sendSwingToSimulator(ball: BallMeasurement): void {
   simWindow!.postMessage(payload, '*');
 }
 
-/** Wire the bridge: ready-handshake listener + auto-forwarding of new swings
- *  (when enabled AND the sim window is already open — auto-open would be
- *  popup-blocked). Call once at app start. */
+/** Send one pitch to the popup simulator window. */
+export function sendPitchToSimulator(ball: BallMeasurement): void {
+  if (!ball.pitch) return;
+  const payload = ballToPitchPayload(ball);
+  if (!isSimulatorOpen()) {
+    queue.length = 0;
+    queue.push(payload);
+    openSimulator();
+    return;
+  }
+  if (!simReady) {
+    queue.push(payload);
+    return;
+  }
+  simWindow!.postMessage(payload, '*');
+}
+
+/** Wire the bridge: ready-handshake listener + auto-forwarding to both the
+ *  embedded sim (always mirrors the active swing) and the popup window (when
+ *  auto-send is on). Call once at app start. */
 export function initSimulatorBridge(): void {
   window.addEventListener('message', (e: MessageEvent) => {
     if (e.data?.type !== 'ovlm:sim-ready') return;
@@ -154,12 +246,29 @@ export function initSimulatorBridge(): void {
     for (const p of queue.splice(0)) simWindow?.postMessage(p, '*');
   });
 
+  // Embedded sim always mirrors the active swing — covers both live arrivals
+  // (activeSwingId updates when a new swing is ingested) and the user clicking
+  // a past swing in the Metrics list.
+  let lastActiveId: string | null = useStore.getState().activeSwingId ?? null;
+  useStore.subscribe((state) => {
+    const activeId = state.activeSwingId;
+    if (!activeId || activeId === lastActiveId) return;
+    lastActiveId = activeId;
+    const sw = state.swings.find((s) => s.id === activeId);
+    if (!sw) return;
+    if (sw.ball.pitch) sendPitchToEmbed(sw.ball);
+    else sendSwingToEmbed(sw.ball);
+  });
+
+  // Popup window: auto-forward new swings when the feature is enabled.
   let lastTopId: string | null = useStore.getState().swings[0]?.id ?? null;
   useStore.subscribe((state) => {
     const top = state.swings[0];
     if (!top || top.id === lastTopId) return;
     lastTopId = top.id;
-    sendSwingToEmbed(top.ball); // embedded sim always mirrors live swings
-    if (getAutoSend() && isSimulatorOpen()) sendSwingToSimulator(top.ball);
+    if (getAutoSend() && isSimulatorOpen()) {
+      if (top.ball.pitch) sendPitchToSimulator(top.ball);
+      else sendSwingToSimulator(top.ball);
+    }
   });
 }

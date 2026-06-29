@@ -16,16 +16,28 @@ export interface PiHealth {
   memUsedMb:  number;
   memTotalMb: number;
   loadAvg1m:  number;
+  cam0Fps?: number;
+  cam1Fps?: number;
 }
 
 export interface CalibrationProgress {
   state: 'collecting' | 'done' | 'error';
+  mode?: 'hitting' | 'pitching';
   progress?: number;
   total?: number;
   baselineMm?: number;
   reprojPx?: number;
   rmsMm?: number;
   message?: string;
+}
+
+export interface RadarStatus {
+  pitchMph: number | null;
+  evMph:    number | null;
+  rangeM:   number | null;
+  /** Wall-clock ms when this update arrived — used to grey out the readout
+   *  if the radar stops sending. */
+  receivedAt: number;
 }
 
 export interface SessionSlice {
@@ -35,6 +47,7 @@ export interface SessionSlice {
   wsHost: string;
   audioLevel: AudioLevel | null;
   piHealth:   PiHealth | null;
+  radarStatus: RadarStatus | null;
   calibrationProgress: CalibrationProgress | null;
   allTimeBestEv:   number;
   newRecordSwingId: string | null;   // set for ~3s when a swing beats the all-time record
@@ -47,6 +60,7 @@ export interface SessionSlice {
   clearSwings: () => void;
   updateAudioLevel: (level: AudioLevel) => void;
   updatePiHealth:   (health: PiHealth) => void;
+  updateRadarStatus:(status: Omit<RadarStatus, 'receivedAt'>) => void;
   updateCalibrationProgress: (progress: CalibrationProgress) => void;
   clearNewRecord: () => void;
 }
@@ -77,6 +91,7 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
   wsHost: loadWsHost(),
   audioLevel: null,
   piHealth:   null,
+  radarStatus: null,
   calibrationProgress: null,
   allTimeBestEv:    parseFloat(localStorage.getItem(STORAGE_KEY_ATR) ?? '0') || 0,
   newRecordSwingId: null,
@@ -113,6 +128,8 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
               spinEfficiency: msg.spin.efficiency,
               seamFrames: [],
               confidence: msg.spin.confidence,
+              gyroDeg: msg.spin.gyroDeg ?? 0,
+              axisConfidence: msg.spin.axisConfidence ?? 1,
             }
           : null,
         contactFrameIndex: 0,
@@ -128,6 +145,24 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
           x: p.x, y: p.y, z: p.z,
           timestamp: p.t * 1_000_000,
         })),
+        pitch: msg.pitch ? {
+          releaseSpeedMph:    msg.pitch.release_speed_mph,
+          plateSpeedMph:      msg.pitch.plate_speed_mph,
+          plateTimeS:         msg.pitch.plate_time_s,
+          plateLocXFt:        msg.pitch.plate_loc_x_ft,
+          plateLocYFt:        msg.pitch.plate_loc_y_ft,
+          releaseHeightFt:    msg.pitch.release_height_ft,
+          releaseSideFt:      msg.pitch.release_side_ft,
+          extensionFt:        msg.pitch.extension_ft,
+          verticalBreakIn:    msg.pitch.vertical_break_in,
+          horizontalBreakIn:  msg.pitch.horizontal_break_in,
+          totalBreakIn:       msg.pitch.total_break_in,
+          vaaDeg:             msg.pitch.vaa_deg,
+          haaDeg:             msg.pitch.haa_deg,
+          spinRateRpm:        msg.pitch.spin_rate_rpm,
+          spinTilt:           msg.pitch.spin_tilt,
+          activeSpinPct:      msg.pitch.active_spin_pct,
+        } : null,
       };
       const session: SwingSession = {
         id: crypto.randomUUID(),
@@ -163,6 +198,8 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
 
   updateAudioLevel: (level)  => set({ audioLevel: level }),
   updatePiHealth:   (health) => set({ piHealth: health }),
+  updateRadarStatus: (status) =>
+    set({ radarStatus: { ...status, receivedAt: Date.now() } }),
   updateCalibrationProgress: (progress) => set({ calibrationProgress: progress }),
   clearNewRecord:   ()       => set({ newRecordSwingId: null }),
 });

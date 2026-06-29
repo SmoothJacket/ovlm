@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useActiveSwing } from '@/state/store';
 import {
-  getSimulatorUrl, registerEmbed, sendSwingToEmbed,
+  getSimulatorUrl, registerEmbed, sendSwingToEmbed, sendPitchToEmbed,
 } from '@/integrations/simulator';
 
 /**
@@ -42,10 +42,18 @@ export function SimulatorFrame({ visible }: { visible: boolean }): React.ReactEl
       {activeSwing && visible && (
         <button
           style={styles.replayBtn}
-          title="Replay the swing selected in Metrics"
-          onClick={() => sendSwingToEmbed(activeSwing.ball)}
+          title="Re-run the animation for the active swing"
+          onClick={() => {
+            if (activeSwing.ball.pitch) {
+              sendPitchToEmbed(activeSwing.ball);
+            } else {
+              sendSwingToEmbed(activeSwing.ball);
+            }
+          }}
         >
-          ⚾ REPLAY {activeSwing.ball.exitVelocity.toFixed(1)} mph / {activeSwing.ball.launchAngle.toFixed(0)}°
+          {activeSwing.ball.pitch
+            ? `↺  ${activeSwing.ball.pitch.releaseSpeedMph.toFixed(1)} mph pitch`
+            : `↺  ${activeSwing.ball.exitVelocity.toFixed(1)} mph / ${activeSwing.ball.launchAngle.toFixed(0)}°`}
         </button>
       )}
     </div>

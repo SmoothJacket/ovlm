@@ -44,6 +44,10 @@ export interface SeamMeasurement {
   seamFrames: number[];
   /** Confidence of spin measurement 0-1 */
   confidence: number;
+  /** Gyro angle in degrees: 0 = pure transverse, +90 = RHP gyroball, -90 = LHP gyroball */
+  gyroDeg: number;
+  /** Reliability of the spin axis direction estimate (0-1) */
+  axisConfidence: number;
 }
 
 export interface BallMeasurement {
@@ -71,6 +75,28 @@ export interface BallMeasurement {
   pitchVelocityMph: number | null;
   /** Measured carry distance in metres from OPS243 FMCW, null if unavailable */
   carryDistanceM: number | null;
+  /** Trackman-style pitch metrics, present only when the trajectory was a
+   *  pitch (ball travelling toward the plate). */
+  pitch: PitchMetrics | null;
+}
+
+export interface PitchMetrics {
+  releaseSpeedMph:    number;
+  plateSpeedMph:      number;
+  plateTimeS:         number;
+  plateLocXFt:        number;
+  plateLocYFt:        number;
+  releaseHeightFt:    number;
+  releaseSideFt:      number;
+  extensionFt:        number;
+  verticalBreakIn:    number;
+  horizontalBreakIn:  number;
+  totalBreakIn:       number;
+  vaaDeg:             number;
+  haaDeg:             number;
+  spinRateRpm:        number | null;
+  spinTilt:           string | null;   // "HH:MM" clock face
+  activeSpinPct:      number | null;
 }
 
 /** Result of the Kalman trajectory filter */
