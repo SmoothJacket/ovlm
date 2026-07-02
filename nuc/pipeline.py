@@ -33,10 +33,11 @@ MPS_TO_MPH = 2.23694
 
 
 class TrackingPipeline:
-    def __init__(self, server, ops243=None, spin_ring=None) -> None:
-        self._server       = server
-        self._ops243       = ops243      # optional OPS243Reader (OmniPreSense)
-        self._spin_ring    = spin_ring   # optional SpinFrameRing (640 fps spin cam)
+    def __init__(self, server, ops243=None, spin_ring=None, get_sub_session=None) -> None:
+        self._server          = server
+        self._ops243          = ops243           # optional OPS243Reader (OmniPreSense)
+        self._spin_ring       = spin_ring        # optional SpinFrameRing (640 fps spin cam)
+        self._get_sub_session = get_sub_session  # () -> str|None — current sub-session type
         self._tracker0     = BallTracker()
         self._tracker1     = BallTracker()
         self._tracker_spin = BallTracker(
@@ -82,6 +83,18 @@ class TrackingPipeline:
         use_spin_cam = len(spin_frames) > 0
         spin_source = 'spincam' if use_spin_cam else 'stereo'
 
+        # Time window for which 3D points are valid.
+        # For EV (main pipeline, ops243 present): ball leaves contact just before
+        # the trigger. Use a tight post-trigger window — pre-trigger frames have
+        # the ball sitting stationary on the tee and will dominate the trajectory fit.
+        # For pitch (pitch pipeline, no ops243): ball is incoming, so use pre-trigger.
+        if self._ops243 is not None:   # EV / hit capture
+            _pt_lo = trigger_time - 0.10   # 0.10 s before (ball still near plate)
+            _pt_hi = trigger_time + 0.50   # 0.50 s after  (ball in outfield flight)
+        else:                          # pitch capture
+            _pt_lo = trigger_time - 0.65   # 0.65 s before (ball in air from pitcher)
+            _pt_hi = trigger_time + 0.10   # 0.10 s after  (ball through the zone)
+
         points: List[Point3D] = []
 
         for frame_idx, pair in enumerate(frames):
@@ -99,6 +112,11 @@ class TrackingPipeline:
                     self._seam1.process_frame(pair.right, d1, pair.timestamp, frame_idx)
 
             if d0 is None or d1 is None:
+                continue
+
+            # Skip frames outside the ball-flight window to avoid fitting
+            # stationary background objects (e.g. ball on tee, batter's body).
+            if not (_pt_lo <= pair.timestamp <= _pt_hi):
                 continue
 
             pt = self._triangulator.triangulate(
@@ -158,6 +176,41 @@ class TrackingPipeline:
             rejects.append(f"detect_rate {detect_rate*100:.0f}% < {config.MEAS_MIN_DETECT_RATE*100:.0f}%")
         if rejects:
             log.info("Reject candidate measurement — %s", "; ".join(rejects))
+            # Always drain the radar buffer so stale readings don't bleed into
+            # the next trigger. If radar has a plausible EV, broadcast it as a
+            # radar-only measurement so the UI shows speed even when camera
+            # tracking fails.
+            if self._ops243 is not None:
+                raw_ev  = self._ops243.peak_ev_mph()
+                pit_mph = self._ops243.latest_pitch_mph()
+                self._ops243.clear()
+                bore_cos = abs(float(config.OPS243_BORE_UNIT[2]))
+                if raw_ev is not None and bore_cos > 0.1:
+                    radar_ev = raw_ev / bore_cos * config.OPS243_EV_SCALE
+                    if config.MEAS_MIN_EV_MPH <= radar_ev <= config.MEAS_MAX_EV_MPH:
+                        log.info("Radar-only fallback: raw=%.1f  corrected=%.1f mph", raw_ev, radar_ev)
+                        sub = self._get_sub_session() if self._get_sub_session else None
+                        pv  = round(pit_mph, 2) if pit_mph is not None and sub != 'tee' else None
+                        self._server.broadcast({
+                            "type":             "measurement",
+                            "exitVelocity":     round(radar_ev, 2),
+                            "launchAngle":      0,
+                            "sprayAngle":       0,
+                            "fitResidualMm":    0,
+                            "latencyMs":        round((time.monotonic() - t_start) * 1000),
+                            "detectRate":       round(detect_rate, 3),
+                            "pointsUsed":       metrics.points_used,
+                            "pointsRejected":   metrics.points_rejected,
+                            "evSource":         "radar",
+                            "radarOnly":        True,
+                            "radarVelocityMps": round(radar_ev / MPS_TO_MPH, 3),
+                            "pitchVelocity":    pv,
+                            "carryDistanceM":   None,
+                            "contactXFt":       None,
+                            "contactYFt":       None,
+                            "trajectory":       [],
+                        })
+                        return
             self._server.broadcast({"type": "status", "state": "armed"})
             return
 
@@ -174,12 +227,13 @@ class TrackingPipeline:
 
         # OPS243-C-FC-RP (primary radar — pitch speed, EV, FMCW range)
         if self._ops243 is not None:
-            ops_ev_mph    = self._ops243.latest_ev_mph()
+            ops_ev_mph    = self._ops243.peak_ev_mph()
             ops_pitch_mph = self._ops243.latest_pitch_mph()
             ops_range_m   = self._ops243.latest_range_m()
             self._ops243.clear()
 
-            if ops_pitch_mph is not None:
+            sub_session = self._get_sub_session() if self._get_sub_session else None
+            if ops_pitch_mph is not None and sub_session != "tee":
                 pitch_velocity_mph = round(ops_pitch_mph, 2)
 
             if ops_range_m is not None:
@@ -187,22 +241,28 @@ class TrackingPipeline:
                 carry_source     = 'radar'
 
             if ops_ev_mph is not None:
-                # The OPS243 measures radial velocity along its bore axis. With
-                # the unit mounted behind home plate the radial component equals
-                # v_true · cos(spray) · cos(launch). Divide it back out so the
-                # agreement gate compares true speeds rather than projections.
-                # Guard: if the ball is hit more than 70° off-axis the geometry
-                # is too oblique for the correction to be reliable.
-                spray_rad  = math.radians(metrics.spray_angle_deg)
-                launch_rad = math.radians(metrics.launch_angle_deg)
-                cos_factor = math.cos(spray_rad) * math.cos(launch_rad)
-                if abs(cos_factor) >= math.cos(math.radians(70)):
-                    ops_ev_mph = ops_ev_mph / cos_factor
-                    log.debug("OPS243 cosine correction: ×%.3f (spray=%.1f° launch=%.1f°)",
-                              1.0 / cos_factor, metrics.spray_angle_deg, metrics.launch_angle_deg)
+                # Exact per-shot cosine correction: radar measures v_true × cos(θ)
+                # where θ is the angle between the ball's velocity and the bore axis.
+                # The camera gives the true 3-D velocity vector, so θ is computed
+                # exactly for each hit — no approximation from spray/launch angles.
+                _bore = np.array(config.OPS243_BORE_UNIT)
+                _vhat = np.array([metrics.vx0, metrics.vy0, metrics.vz0])
+                _vnorm = float(np.linalg.norm(_vhat))
+                if _vnorm > 0:
+                    cos_theta = abs(float(np.dot(_vhat / _vnorm, _bore)))
+                    if cos_theta >= 0.25:   # reject if > ~75° off bore — correction too large
+                        raw_ev    = ops_ev_mph
+                        ops_ev_mph = raw_ev / cos_theta * config.OPS243_EV_SCALE
+                        log.debug(
+                            "OPS243 exact cosine: raw=%.1f  cos=%.3f (%.1f°)  corrected=%.1f mph  scale=%.3f",
+                            raw_ev, cos_theta, math.degrees(math.acos(cos_theta)), ops_ev_mph,
+                            config.OPS243_EV_SCALE,
+                        )
+                    else:
+                        log.info("OPS243 EV skipped — %.1f° from bore (too oblique)",
+                                 math.degrees(math.acos(cos_theta)))
+                        ops_ev_mph = None
                 else:
-                    log.info("OPS243 EV skipped — spray %.1f° + launch %.1f° too oblique to radar",
-                             metrics.spray_angle_deg, metrics.launch_angle_deg)
                     ops_ev_mph = None
 
             if ops_ev_mph is not None:
@@ -257,17 +317,30 @@ class TrackingPipeline:
             log.info("Magnus spin: %.0f rpm  axis=(%.2f, %.2f, %.2f)  axis_conf=%.2f",
                      magnus_rpm, *(magnus_axis or (0, 0, 0)), axis_confidence)
 
-        # ── Spin: axis-first gyro-corrected seam integration ─────────────────
-        # Camera behind home plate looks toward the pitcher (+Z world frame).
-        # compute_spin_with_axis() integrates total seam rotation over the
-        # full flight and divides by sin(angle between spin_axis and LOS) to
-        # recover the true RPM regardless of pitch type. Falls back to the
-        # uncorrected compute_spin() when no Magnus axis is available, and to
-        # Magnus-only when the pitch is near-pure gyro (slider/sweeper extreme).
+        # Hit ball travels away from camera (+Z); pitch comes toward it (-Z).
+        is_hit = metrics.vz0 > 1.0
+
+        # ── Spin: hit vs pitch paths ──────────────────────────────────────────
+        # Hits: seam tracking is unreliable (ball shrinks as it recedes; only
+        #   ~20 usable frames vs ~90 for pitches). Magnus force inversion from
+        #   the 3-D trajectory is the sole reliable source. The reported RPM is
+        #   the transverse (active) component; gyro fraction is indeterminate.
+        # Pitches: seam tracking is primary; Magnus assists axis / rate.
         _CAM_LOS = (0.0, 0.0, 1.0)   # camera looks in +Z (toward pitcher)
         spin: Optional[SpinMeasurement] = None
 
-        if magnus_axis is not None:
+        if is_hit:
+            if magnus_axis is not None and magnus_rpm is not None:
+                spin = SpinMeasurement(
+                    spin_rate_rpm   = round(magnus_rpm, 0),
+                    spin_axis       = magnus_axis,
+                    spin_efficiency = 1.0,   # reported RPM is already transverse-only
+                    frames_analyzed = 0,
+                    confidence      = round(min(0.8, axis_confidence + 0.2), 2),
+                    axis_confidence = round(axis_confidence, 3),
+                )
+                spin_source = 'magnus'
+        elif magnus_axis is not None:
             s0 = self._seam.compute_spin_with_axis(magnus_axis, _CAM_LOS)
             s1 = (self._seam1.compute_spin_with_axis(magnus_axis, _CAM_LOS)
                   if not use_spin_cam else None)
@@ -275,12 +348,21 @@ class TrackingPipeline:
             if s0 is not None and s1 is not None:
                 w0, w1 = s0.confidence, s1.confidence
                 avg_rpm = (s0.spin_rate_rpm * w0 + s1.spin_rate_rpm * w1) / (w0 + w1)
+                # Scale confidence down when the two cameras disagree substantially.
+                # 12% relative disagreement → confidence halved; >12% → approaches 0.1.
+                rpm_diff_frac = abs(s0.spin_rate_rpm - s1.spin_rate_rpm) / max(avg_rpm, 1.0)
+                agreement = max(0.1, 1.0 - rpm_diff_frac / 0.12)
+                fused_confidence = (w0 + w1) / 2 * agreement
                 spin = dataclasses.replace(
                     s0,
                     spin_rate_rpm   = round(avg_rpm, 0),
                     frames_analyzed = s0.frames_analyzed + s1.frames_analyzed,
-                    confidence      = (w0 + w1) / 2,
+                    confidence      = round(fused_confidence, 3),
                 )
+                log.debug("Dual-cam spin: cam0=%.0f rpm  cam1=%.0f rpm  "
+                          "diff=%.1f%%  agreement=%.2f",
+                          s0.spin_rate_rpm, s1.spin_rate_rpm,
+                          rpm_diff_frac * 100, agreement)
             else:
                 spin = s0 or s1
 
@@ -294,6 +376,30 @@ class TrackingPipeline:
                     axis_confidence = round(axis_confidence, 3),
                 )
                 spin_source = 'axis-corrected'
+
+            # ── Analytical gyro override ──────────────────────────────────────
+            # Use dot(magnus_axis, v_hat) to derive gyro angle analytically.
+            # This is more reliable than the variance estimate inside
+            # compute_spin_with_axis() when axis_confidence is high enough.
+            if spin is not None and magnus_axis is not None and axis_confidence >= 0.35:
+                v_hat    = v_vec / (v_mag + 1e-9)
+                ma       = np.array(magnus_axis, dtype=float)
+                raw_dot  = float(np.dot(ma, v_hat))
+                gyro_sin = min(1.0, abs(raw_dot))
+                gyro_deg = math.copysign(math.degrees(math.asin(gyro_sin)), raw_dot)
+                active_frac = math.sqrt(max(0.0, 1.0 - gyro_sin ** 2))
+                if active_frac > 0.15:  # don't amplify noise for near-pure gyroballs
+                    old_rpm = spin.spin_rate_rpm
+                    rpm_corrected = spin.spin_rate_rpm * spin.spin_efficiency / active_frac
+                    spin = dataclasses.replace(
+                        spin,
+                        spin_rate_rpm   = round(rpm_corrected, 0),
+                        spin_efficiency = round(active_frac, 3),
+                        gyro_angle_deg  = round(gyro_deg, 1),
+                    )
+                    log.info("Analytical gyro: gyro=%.1f°  active=%.2f  "
+                             "rpm %.0f → %.0f",
+                             gyro_deg, active_frac, old_rpm, rpm_corrected)
             elif spin is None and magnus_rpm is not None:
                 # Near-pure gyro or no seam data — Magnus rate only.
                 # Gyroball: axis_confidence will be near 0, flagging unreliable tilt.
@@ -307,16 +413,19 @@ class TrackingPipeline:
                 )
                 spin_source = 'magnus'
         else:
-            # No Magnus axis (weak trajectory curvature) — uncorrected seam.
+            # No Magnus axis (weak trajectory curvature) — uncorrected seam (pitches only).
             s0 = self._seam.compute_spin()
             s1 = self._seam1.compute_spin() if not use_spin_cam else None
             if s0 is not None and s1 is not None:
                 w0, w1 = s0.confidence, s1.confidence
                 avg_rpm = (s0.spin_rate_rpm * w0 + s1.spin_rate_rpm * w1) / (w0 + w1)
+                rpm_diff_frac = abs(s0.spin_rate_rpm - s1.spin_rate_rpm) / max(avg_rpm, 1.0)
+                agreement = max(0.1, 1.0 - rpm_diff_frac / 0.12)
                 spin = dataclasses.replace(
                     s0,
                     spin_rate_rpm   = round(avg_rpm, 0),
                     frames_analyzed = s0.frames_analyzed + s1.frames_analyzed,
+                    confidence      = round((w0 + w1) / 2 * agreement, 3),
                 )
             else:
                 spin = s0 or s1
@@ -345,6 +454,7 @@ class TrackingPipeline:
             metrics.points_used, metrics.points_rejected,
         )
 
+        M_PER_FT = 0.3048
         payload = {
             "type":               "measurement",
             "exitVelocity":       metrics.exit_velocity_mph,
@@ -359,6 +469,10 @@ class TrackingPipeline:
             "radarVelocityMps":   round(radar_velocity_mps, 3) if radar_velocity_mps is not None else None,
             "pitchVelocity":      pitch_velocity_mph,   # mph, from OPS243 inbound reading
             "carryDistanceM":     carry_distance_m,     # meters, from OPS243 FMCW range
+            # Ball position at the τ=0 launch state (trajectory fit extrapolation).
+            # For hits this is the contact point; for pitches this is the release point.
+            "contactXFt":         round(metrics.release_x / M_PER_FT, 2),
+            "contactYFt":         round(metrics.release_y / M_PER_FT, 2),
             "trajectory":         [
                 {"x": p.x, "y": p.y, "z": p.z, "t": p.timestamp}
                 for p in metrics.trajectory

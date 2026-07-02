@@ -236,7 +236,7 @@ FOCAL_LENGTH_PX = 460.0  # approximate; stereo calibration overwrites this
 # HITTING (camera 10 ft behind plate, ball starts at plate and travels away):
 #   Use 8–15 mm for a wide enough view to follow the batted ball.
 LENS_FOCAL_MM         = 25.0   # minimum for full-flight pitching seam tracking
-LENS_FOCAL_MM_HITTING = 8.0    # wider for batted ball departure tracking
+LENS_FOCAL_MM_HITTING = 5.0    # wider for batted ball departure tracking
 
 # ── Ball detection ────────────────────────────────────────────────────────────
 # Pitching mode: at 60 ft with a ~25–50 mm lens the ball is ≈2–4 px radius;
@@ -281,9 +281,52 @@ MAGNUS_CL_SLOPE = 0.60
 OPS243_ENABLED       = True
 OPS243_PORT          = _OPS243_PORT_DEFAULT
 OPS243_BAUD          = 9600
-OPS243_MIN_PITCH_MPS = 15.65  # ~35 mph inbound — slower = ignore (noise / wind)
-OPS243_MIN_EV_MPS    = 15.65  # ~35 mph outbound — slower = ignore (bunts / foul tips)
+OPS243_MIN_PITCH_MPS = 20.12  # ~45 mph inbound — filters body-movement false positives
+OPS243_MIN_EV_MPS    = 17.88  # ~40 mph outbound — matches MEAS_MIN_EV_MPH pipeline floor
 OPS243_AGREE_FRACTION = 0.15  # EV agreement threshold vs. camera (15%)
+# EV speed-scale calibration: multiply cosine-corrected radar EV by this factor.
+# Derived from a known reference hit: radar read 74.9 mph, actual EV = 79.3 mph
+#   → scale = 79.3 / 74.9 = 1.059
+OPS243_EV_SCALE = 1.059
+
+# Minimum Doppler magnitude — rejects weak returns (RF noise, distant objects).
+# A baseball at typical distances returns magnitude 50–200+; raise this if noise
+# persists, lower it if real balls are being missed at long range.
+OPS243_MIN_MAGNITUDE = 20  # baseballs at 1–5 m return 50–200+; raise further if noise persists
+
+# Cosine correction for angled radar mounting (degrees, 0 = disabled).
+# Pitch (inbound, ball approaching radar) and EV (outbound, ball leaving contact zone)
+# travel different directions relative to the radar, so each gets its own angle.
+# How to calibrate: angle = arccos(raw_reading / known_actual_speed)
+# Calibrated from measured vs actual:
+#   Pitch inbound:  raw=39.5 mph, actual=89 mph  → arccos(39.5/89)  = 63.7°
+#   EV outbound:    raw≈78 mph,   actual≈86 mph  → best fit across 2 hits = 23.9°
+#   (EV ball travels nearly straight away from radar; pitch crosses more obliquely)
+# Radar geometry — exact per-shot cosine correction via the camera velocity vector.
+# OPS243_POSITION_M: where the radar sits (metres from plate centre).
+# OPS243_AIM_POINT_M: fixed aim point (pitcher's rubber, ground level) — not user-editable.
+# Bore unit vector is computed automatically. Override position via the calibration
+# screen (saved to radar_settings.json) or edit directly here.
+OPS243_POSITION_M  = (0.0, 0.46, -0.30)   # default: centred, ~18 in high, 12 in behind plate
+OPS243_AIM_POINT_M = (0.0, 0.0,  18.44)   # pitcher's rubber — fixed, not user-editable
+
+# Load position override from radar_settings.json if saved by the calibration UI.
+_radar_settings = _os.path.join(_os.path.dirname(__file__), "radar_settings.json")
+if _os.path.exists(_radar_settings):
+    try:
+        _rp = _json.load(open(_radar_settings)).get("position_m")
+        if _rp and len(_rp) == 3:
+            OPS243_POSITION_M = (float(_rp[0]), float(_rp[1]), float(_rp[2]))
+    except Exception:
+        pass
+
+import math as _math
+_bx = OPS243_AIM_POINT_M[0] - OPS243_POSITION_M[0]
+_by = OPS243_AIM_POINT_M[1] - OPS243_POSITION_M[1]
+_bz = OPS243_AIM_POINT_M[2] - OPS243_POSITION_M[2]
+_bn = _math.sqrt(_bx**2 + _by**2 + _bz**2)
+OPS243_BORE_UNIT = (_bx/_bn, _by/_bn, _bz/_bn) if _bn > 1e-6 else (0.0, 0.0, 1.0)
+del _bx, _by, _bz, _bn
 
 # ── Measurement validity gates (post-fit) ─────────────────────────────────────
 # A trigger fires the pipeline; the pipeline only BROADCASTS a measurement

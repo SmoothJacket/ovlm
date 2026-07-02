@@ -25,15 +25,15 @@ class FrameBuffer:
         self._trigger_time: Optional[float] = None
 
     def push(self, pair: FramePair) -> None:
-        now = time.monotonic()
+        ts = pair.timestamp
         with self._lock:
-            self._ring.append((now, pair))
-            cutoff = now - config.BUFFER_DURATION_S
+            self._ring.append((ts, pair))
+            cutoff = ts - config.BUFFER_DURATION_S
             while self._ring and self._ring[0][0] < cutoff:
                 self._ring.popleft()
 
             if self._trigger_time is not None:
-                elapsed = now - self._trigger_time
+                elapsed = ts - self._trigger_time
                 if elapsed >= config.HALF_WINDOW_S:
                     self._flush_locked()
 

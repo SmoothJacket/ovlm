@@ -8,19 +8,21 @@ export function App(): React.ReactElement {
   const wsHost              = useStore((s) => s.wsHost);
   const updatePipeline      = useStore((s) => s.updatePipelineStatus);
   const ingestMeasurement   = useStore((s) => s.ingestPiMeasurement);
-  const updateAudioLevel    = useStore((s) => s.updateAudioLevel);
   const updatePiHealth      = useStore((s) => s.updatePiHealth);
   const setLastFrame        = useStore((s) => s.setLastFrame);
   const updateCalibrationProgress = useStore((s) => s.updateCalibrationProgress);
+  const markModeCalibrated  = useStore((s) => s.markModeCalibrated);
+  const updateRadarStatus   = useStore((s) => s.updateRadarStatus);
 
   useEffect(() => {
     piClient.connect(wsHost, {
       updatePipelineStatus: updatePipeline as (p: Record<string, unknown>) => void,
       ingestPiMeasurement:  ingestMeasurement,
-      updateAudioLevel,
       updatePiHealth,
       setLastFrame,
       updateCalibrationProgress,
+      markModeCalibrated,
+      updateRadarStatus,
     });
     return () => piClient.disconnect();
   }, [wsHost]);
@@ -38,6 +40,17 @@ export function App(): React.ReactElement {
 }
 
 const globalStyles = `
+  /* Light theme via global invert: flips the dark palette to a light one
+     in one shot. Camera feeds, the 3-D simulator iframe, and any embedded
+     images / canvases / videos get the inverse filter so their pixels stay
+     correct (otherwise we'd be looking at colour-negative camera frames). */
+  html, body { background: #ffffff; }
+  html { filter: invert(1) hue-rotate(180deg); -webkit-filter: invert(1) hue-rotate(180deg); }
+  img, video, canvas, iframe, picture, svg image {
+    filter: invert(1) hue-rotate(180deg);
+    -webkit-filter: invert(1) hue-rotate(180deg);
+  }
+
   @keyframes spin {
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }

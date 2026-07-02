@@ -32,6 +32,9 @@ export interface SimHitPayload {
   sprayAngle: number;
   backspin: number;
   sidespin: number;
+  /** Contact point at the plate (feet). +X = first-base side, Y = height above ground. */
+  contactXFt?: number;
+  contactYFt?: number;
   /** Captured 3-D points in OVLM world frame (metres):
    *  +X = first base, +Y = up, +Z = toward the pitcher.
    *  The simulator projects these into its stadium frame and draws them as
@@ -126,6 +129,8 @@ export function ballToSimPayload(ball: BallMeasurement): SimHitPayload {
     sprayAngle: ball.sprayAngle,
     backspin,
     sidespin,
+    contactXFt: ball.contactXFt,
+    contactYFt: ball.contactYFt,
     trajectory,
   };
 }

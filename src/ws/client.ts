@@ -10,10 +10,11 @@ import type { PiMessage, BrowserMessage } from './messages';
 type StoreRef = {
   updatePipelineStatus: (patch: Record<string, unknown>) => void;
   ingestPiMeasurement: (msg: Extract<PiMessage, { type: 'measurement' }>) => void;
-  updateAudioLevel: (level: Extract<PiMessage, { type: 'audio_level' }>) => void;
   updatePiHealth:   (h: Extract<PiMessage, { type: 'health' }>) => void;
   setLastFrame: (frame: Extract<PiMessage, { type: 'calib_frame' }>) => void;
   updateCalibrationProgress: (msg: Extract<PiMessage, { type: 'calibration' }>) => void;
+  markModeCalibrated: (mode: 'hitting' | 'pitching') => void;
+  updateRadarStatus: (msg: Extract<PiMessage, { type: 'radar_status' }>) => void;
 };
 
 const BACKOFF_CAP_MS = 30_000;
@@ -90,28 +91,31 @@ class PiClient {
     if (!this.store) return;
     switch (msg.type) {
       case 'status':
-        this.store.updatePipelineStatus({
-          state: msg.state,
-          audioArmed: msg.audioArmed ?? false,
-        });
+        this.store.updatePipelineStatus({ state: msg.state });
         break;
       case 'measurement':
         this.store.ingestPiMeasurement(msg);
-        break;
-      case 'audio_level':
-        this.store.updateAudioLevel(msg);
         break;
       case 'health':
         this.store.updatePiHealth(msg);
         break;
       case 'calibration':
         this.store.updateCalibrationProgress(msg);
+        if (msg.state === 'done' && msg.mode) {
+          this.store.markModeCalibrated(msg.mode);
+        }
         break;
       case 'error':
         this.store.updatePipelineStatus({ errorMessage: msg.message });
         break;
       case 'calib_frame':
         this.store.setLastFrame(msg);
+        break;
+      case 'session_mode':
+        if (msg.calibrated) this.store.markModeCalibrated(msg.mode);
+        break;
+      case 'radar_status':
+        this.store.updateRadarStatus(msg);
         break;
     }
   }

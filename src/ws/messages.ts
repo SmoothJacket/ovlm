@@ -3,7 +3,6 @@ export type PiMessage =
   | {
       type: 'status';
       state: 'idle' | 'armed' | 'capturing' | 'processing';
-      audioArmed?: boolean;
     }
   | {
       type: 'measurement';
@@ -27,10 +26,17 @@ export type PiMessage =
         axisConfidence?: number;
       };
       evSource: 'camera' | 'radar';
+      /** True when camera tracking failed and only radar EV is available.
+       *  In that case launchAngle/sprayAngle/fitResidualMm are unreliable (set to 0/null). */
+      radarOnly?: boolean;
       radarVelocityMps: number | null;
       pitchVelocity:    number | null;   // mph — OPS243 inbound reading (pitch speed)
       carryDistanceM:   number | null;   // metres — OPS243 FMCW range when present, else ballistic fit from stereo trajectory
       trajectory: Array<{ x: number; y: number; z: number; t: number }>;
+      /** Ball position at τ=0 from the trajectory fit (feet).
+       *  Hits: contact point.  Pitches: release point. */
+      contactXFt?: number;
+      contactYFt?: number;
       /** Trackman-style pitch metrics, present only when the trajectory was
        *  a pitch (ball travelling toward the plate). */
       pitch?: {
@@ -52,7 +58,6 @@ export type PiMessage =
         active_spin_pct:     number | null;
       };
     }
-  | { type: 'audio_level'; rms: number; peak: number; threshold: number }
   | { type: 'health'; cpuTempC: number; memUsedMb: number; memTotalMb: number; loadAvg1m: number;
       cam0Fps?: number; cam1Fps?: number; }
   | {
@@ -84,7 +89,6 @@ export type BrowserMessage =
   | { type: 'disarm' }
   | { type: 'reset' }
   | { type: 'trigger' }   // manual capture — fires the buffer flush at "now"
-  | { type: 'set_threshold'; value: number }
   | { type: 'calibrate'; mode?: 'hitting' | 'pitching' }
   | {
       type: 'calib_manual';
@@ -93,5 +97,8 @@ export type BrowserMessage =
       heightMm: number;
       distanceMm: number;
       mode?: 'hitting' | 'pitching';
+      radarBehindMm?: number;
+      radarHeightMm?: number;
     }
-  | { type: 'set_session_mode'; mode: 'hitting' | 'pitching' };
+  | { type: 'set_session_mode'; mode: 'hitting' | 'pitching' }
+  | { type: 'set_sub_session'; subType: 'tee' | 'front_toss' | 'live_bp' | null };

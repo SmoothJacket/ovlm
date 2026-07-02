@@ -100,7 +100,7 @@ def canonical_order(pts: np.ndarray) -> Optional[np.ndarray]:
 # ── Intrinsics ────────────────────────────────────────────────────────────────
 
 def build_K(width: int, height: int, focal_px: Optional[float] = None) -> np.ndarray:
-    f = focal_px if focal_px is not None else config.focal_px(width)
+    f = focal_px if focal_px is not None else config.focal_px(width=width)
     return np.array([[f, 0, width / 2.0],
                      [0, f, height / 2.0],
                      [0, 0, 1.0]], dtype=np.float64)
@@ -129,7 +129,7 @@ def refine_focal_from_homography(corners_canon: np.ndarray, width: int, height: 
         return None
     f = float(np.sqrt(f2))
     # Sanity clamp to a plausible range around the lens-derived value
-    nominal = config.focal_px(width)
+    nominal = config.focal_px(width=width)
     if f < 0.3 * nominal or f > 3.0 * nominal:
         return None
     return f
@@ -196,11 +196,13 @@ def projection_matrix(K: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray
 
 def _open(idx: int):
     cap = cv2.VideoCapture(idx, config.CAMERA_BACKEND)
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
+    if config.CAMERA_FOURCC:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  config.WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.HEIGHT)
-    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-    cap.set(cv2.CAP_PROP_EXPOSURE, float(config.EXPOSURE_VALUE))
+    if config.APPLY_EXPOSURE:
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+        cap.set(cv2.CAP_PROP_EXPOSURE, float(config.EXPOSURE_VALUE))
     return cap
 
 
@@ -276,8 +278,11 @@ class LiveCollector:
     calibration samples after start_collecting() is called. This gives a
     Trackman-style UX: cameras are always live, one click starts the solve.
 
-    Detection runs every `every_nth` frames (default 30) to avoid starving the
-    ball-tracking capture thread at 210 fps — ~7 fps is plenty for calibration.
+    Detection runs in a dedicated background thread so feed() returns immediately
+    and never stalls the 210 fps stereo capture pair-loop. Every `every_nth`
+    frames a new frame pair is posted to the detector; if it is still busy the
+    frame is dropped (the detector always works on the most recent one). The UI
+    preview updates on every feed() call.
     """
 
     def __init__(self, frames: int = config.PLATE_CALIB_FRAMES,
@@ -290,6 +295,47 @@ class LiveCollector:
         self._lock  = threading.Lock()
         self._last  = None          # (left_bgr, right_bgr, corners0, corners1)
         self._feed_n = 0
+
+        # Background detector: single daemon thread with a frame-dropping inbox.
+        # The capture thread writes to _detect_pending and signals _detect_event;
+        # the detector grabs the latest frame, clears the inbox, then runs
+        # detect_plate_corners without holding any lock.
+        self._detect_pending: Optional[Tuple[np.ndarray, np.ndarray]] = None
+        self._detect_lock  = threading.Lock()
+        self._detect_event = threading.Event()
+        threading.Thread(target=self._detect_loop, daemon=True,
+                         name="plate-detect").start()
+
+    # ── Background detection thread ───────────────────────────────────────────
+
+    def _detect_loop(self) -> None:
+        while True:
+            self._detect_event.wait()
+            self._detect_event.clear()
+
+            with self._detect_lock:
+                pending = self._detect_pending
+                self._detect_pending = None
+            if pending is None:
+                continue
+            left, right = pending
+
+            try:
+                c0 = canonical_order(detect_plate_corners(left))
+                c1 = canonical_order(detect_plate_corners(right))
+            except Exception:
+                c0 = c1 = None
+
+            with self._lock:
+                # Stamp latest corners onto the current frame snapshot
+                if self._last is not None:
+                    fl, fr, _, _ = self._last
+                    self._last = (fl, fr, c0, c1)
+                # Accumulate if we're collecting and haven't hit the target yet
+                if (self._collecting and c0 is not None and c1 is not None
+                        and len(self._acc0) < self.frames):
+                    self._acc0.append(c0)
+                    self._acc1.append(c1)
 
     # ── Public properties ─────────────────────────────────────────────────────
 
@@ -316,9 +362,9 @@ class LiveCollector:
 
     def start_collecting(self) -> None:
         """Begin accumulating samples. Safe to call from any thread."""
-        self._acc0.clear()
-        self._acc1.clear()
         with self._lock:
+            self._acc0.clear()
+            self._acc1.clear()
             self._collecting = True
 
     def stop_collecting(self) -> None:
@@ -328,24 +374,26 @@ class LiveCollector:
     # ── Frame feed (called from capture thread) ───────────────────────────────
 
     def feed(self, left: np.ndarray, right: np.ndarray) -> bool:
-        """Store the latest frame pair for preview; accumulate if collecting.
-        Subsampled to every_nth frames to keep CPU load low. Returns True only
-        when a sample was added to the accumulator."""
-        self._feed_n += 1
-        if self._feed_n % self.every_nth != 0:
-            return False
+        """Store the latest frame pair for preview; post to detector if due.
 
-        c0 = canonical_order(detect_plate_corners(left))
-        c1 = canonical_order(detect_plate_corners(right))
+        Returns immediately — detection runs in the background thread. The UI
+        preview updates on every call; plate-corner detection and accumulation
+        happen asynchronously without blocking the capture pair-loop.
+        """
+        self._feed_n += 1
+        left_snap  = left.copy()
+        right_snap = right.copy()
 
         with self._lock:
-            self._last = (left.copy(), right.copy(), c0, c1)
-            collecting = self._collecting
+            prev_c0 = self._last[2] if self._last is not None else None
+            prev_c1 = self._last[3] if self._last is not None else None
+            self._last = (left_snap, right_snap, prev_c0, prev_c1)
 
-        if collecting and c0 is not None and c1 is not None and not self.done:
-            self._acc0.append(c0)
-            self._acc1.append(c1)
-            return True
+        if self._feed_n % self.every_nth == 0:
+            with self._detect_lock:
+                self._detect_pending = (left_snap, right_snap)
+            self._detect_event.set()
+
         return False
 
     # ── Preview (called from server async loop at ~15 fps) ───────────────────
@@ -369,7 +417,7 @@ class LiveCollector:
 
     # ── Solve ─────────────────────────────────────────────────────────────────
 
-    def solve(self, out_path: str) -> Optional[dict]:
+    def solve(self, out_path: str, focal_mm: Optional[float] = None) -> Optional[dict]:
         """Average accumulated samples and run the stereo PnP solve.
         Returns result dict on success, None on failure."""
         if len(self._acc0) < max(5, self.frames // 4):
@@ -377,7 +425,7 @@ class LiveCollector:
         c0 = np.mean(self._acc0, axis=0)
         c1 = np.mean(self._acc1, axis=0)
         img_size = (config.WIDTH, config.HEIGHT)
-        if not calibrate(c0, c1, img_size, out_path, refine_focal=False):
+        if not calibrate(c0, c1, img_size, out_path, refine_focal=False, focal_mm=focal_mm):
             return None
         data = np.load(out_path)
         return {
@@ -385,6 +433,46 @@ class LiveCollector:
             "reprojPx":   float(data["reproj_px"]),
             "rmsMm":      float(data["triangulation_rms_mm"]),
         }
+
+
+def solve_from_manual_corners(
+    corners0: list,
+    corners1: list,
+    img_size: tuple,
+    out_path: str,
+    height_mm: float = 0.0,
+    dist_mm: float = 0.0,
+    focal_mm: Optional[float] = None,
+) -> Optional[dict]:
+    """Solve stereo calibration from manually-clicked corners.
+
+    corners0 / corners1 are lists of 5 [x, y] pairs in click order:
+    [FL, FR, MR, BP, ML] — matching plate_object_points(). The solver
+    tries both the supplied ordering and its L/R mirror, so minor
+    left/right confusion is self-correcting.
+
+    height_mm and dist_mm (rig measurements) are stored in the output
+    file for reference; they don't affect the PnP math.
+    """
+    if len(corners0) != 5 or len(corners1) != 5:
+        return None
+    c0 = np.array(corners0, dtype=np.float64)
+    c1 = np.array(corners1, dtype=np.float64)
+    if not calibrate(c0, c1, img_size, out_path, refine_focal=False, focal_mm=focal_mm):
+        return None
+    data = np.load(out_path, allow_pickle=True)
+    # Re-save with rig measurements appended
+    np.savez(
+        out_path,
+        **{k: data[k] for k in data.files},
+        rig_height_mm=np.float64(height_mm),
+        rig_dist_mm=np.float64(dist_mm),
+    )
+    return {
+        "baselineMm": float(data["baseline_mm"]),
+        "reprojPx":   float(data["reproj_px"]),
+        "rmsMm":      float(data["triangulation_rms_mm"]),
+    }
 
 
 def _annot(frame, corners, label):
@@ -405,9 +493,9 @@ def _annot(frame, corners, label):
 # ── Solve + save ──────────────────────────────────────────────────────────────
 
 def calibrate(c0: np.ndarray, c1: np.ndarray, img_size, out_path: str,
-              refine_focal: bool) -> bool:
+              refine_focal: bool, focal_mm: Optional[float] = None) -> bool:
     W, H = img_size
-    focal = None
+    focal = config.focal_px(focal_mm=focal_mm, width=W) if focal_mm is not None else None
     if refine_focal:
         f0 = refine_focal_from_homography(c0, W, H)
         f1 = refine_focal_from_homography(c1, W, H)
@@ -415,7 +503,7 @@ def calibrate(c0: np.ndarray, c1: np.ndarray, img_size, out_path: str,
         if cand:
             focal = float(np.mean(cand))
             print(f"Focal length refined from plate homography: {focal:.1f} px "
-                  f"(lens-derived was {config.focal_px(W):.1f} px)")
+                  f"(lens-derived was {config.focal_px(width=W):.1f} px)")
         else:
             print("Focal refinement failed; using lens-derived focal length.")
 

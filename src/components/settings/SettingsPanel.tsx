@@ -207,7 +207,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 10,
     fontWeight: 700,
     letterSpacing: '0.2em',
-    color: '#445',
+    color: '#d0d4dc',
   },
   section: {
     display: 'flex',
@@ -222,7 +222,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     fontWeight: 700,
     letterSpacing: '0.15em',
-    color: '#445',
+    color: '#d0d4dc',
     background: '#0d0d14',
     borderBottom: '1px solid #1a1a2e',
   },
@@ -240,7 +240,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   rowLabel: {
     fontSize: 11,
-    color: '#99aabb',
+    color: '#888888',
     width: 200,
     flexShrink: 0,
     paddingTop: 2,
@@ -261,7 +261,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#07070f',
     border: '1px solid #1a1a2e',
     borderRadius: 4,
-    color: '#aabbcc',
+    color: '#554433',
     fontFamily: 'inherit',
     fontSize: 12,
     padding: '5px 10px',
@@ -269,11 +269,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   unit: {
     fontSize: 10,
-    color: '#445',
+    color: '#d0d4dc',
   },
   hint: {
     fontSize: 9,
-    color: '#334',
+    color: '#e0e4ec',
     lineHeight: 1.5,
   },
   toggleGroup: {
@@ -288,7 +288,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'transparent',
     border: 'none',
     borderRight: '1px solid #1a1a2e',
-    color: '#445',
+    color: '#d0d4dc',
     cursor: 'pointer',
     fontSize: 11,
     fontWeight: 700,

@@ -41,8 +41,11 @@ class SpinFrame:
 FramePairCallback = Callable[[FramePair], None]
 SpinFrameCallback = Callable[[SpinFrame], None]
 
-# One frame interval — maximum allowed timestamp skew between L and R frames
-_MAX_SKEW_S = 1.0 / config.FRAMERATE
+# Maximum timestamp skew between L and R frames.
+# Floor of 100 ms ensures pairs always emit on slow/dev cameras that don't reach
+# the configured frame rate; the actual skew between two running USB cameras is
+# always much smaller than this, so ball-tracking accuracy isn't affected.
+_MAX_SKEW_S = max(1.0 / config.FRAMERATE, 0.1)
 
 
 def _make_camera(idx: int, width: int, height: int, fps: float,
@@ -53,18 +56,19 @@ def _make_camera(idx: int, width: int, height: int, fps: float,
 
     # MJPEG must be selected BEFORE resolution/fps — these cameras only reach
     # their high frame rates in MJPEG; the uncompressed default caps at ~30 fps.
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
+    if config.CAMERA_FOURCC:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FOURCC))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv2.CAP_PROP_FPS,          float(fps))
 
-    # Disable auto-exposure before setting manual value.
-    # 0.25 = manual mode in the DirectShow / MSMF convention.
-    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-    cap.set(cv2.CAP_PROP_EXPOSURE, float(exposure))
-
-    if gain >= 0:
-        cap.set(cv2.CAP_PROP_GAIN, float(gain))
+    if config.APPLY_EXPOSURE:
+        # Disable auto-exposure then set manual value.
+        # 0.25 = manual mode in the V4L2 / DirectShow / MSMF convention.
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+        cap.set(cv2.CAP_PROP_EXPOSURE, float(exposure))
+        if gain >= 0:
+            cap.set(cv2.CAP_PROP_GAIN, float(gain))
 
     return cap
 
@@ -95,17 +99,63 @@ class StereoCapturer:
         self._lock = threading.Lock()
         self._new_frame = threading.Event()
 
+        # Measured frame rates (updated every 2 s by each capture thread)
+        self._fps: list = [0.0, 0.0]
+
     # ── Public API ────────────────────────────────────────────────────────────
+
+    @property
+    def measured_fps(self) -> Tuple[float, float]:
+        """Actual frame rates measured over the last 2 s (updated continuously)."""
+        return self._fps[0], self._fps[1]
 
     def start(self) -> None:
         self._cap0 = _make_camera(config.CAM0_IDX, config.WIDTH, config.HEIGHT,
                                   config.FRAMERATE, config.EXPOSURE_VALUE, config.GAIN_VALUE)
         self._cap1 = _make_camera(config.CAM1_IDX, config.WIDTH, config.HEIGHT,
                                   config.FRAMERATE, config.EXPOSURE_VALUE, config.GAIN_VALUE)
+
+        # ── Resolution sanity check ──────────────────────────────────────────
+        # cap.get(WIDTH/HEIGHT) returns what we REQUESTED on macOS AVFoundation
+        # even when the camera silently negotiates a different mode, so we must
+        # actually read a frame to learn the true delivered size. If cam0 and
+        # cam1 end up at different sizes, triangulation will be wrong (the
+        # calibration K is built for ONE resolution), so refuse to start.
+        def _probe(cap, label):
+            ok, f = cap.read()
+            if not ok or f is None:
+                raise RuntimeError(f"{label}: cap.read() returned no frame")
+            return f.shape[1], f.shape[0]   # (w, h)
+
+        try:
+            w0, h0 = _probe(self._cap0, "cam0")
+            w1, h1 = _probe(self._cap1, "cam1")
+        except RuntimeError:
+            self._cap0.release(); self._cap1.release()
+            raise
+
+        if (w0, h0) != (w1, h1):
+            self._cap0.release(); self._cap1.release()
+            raise RuntimeError(
+                f"Camera resolution mismatch: cam0 delivered {w0}×{h0}, "
+                f"cam1 delivered {w1}×{h1}. Both must be the same size for "
+                f"stereo triangulation to be accurate. Tip: change "
+                f"config.WIDTH×HEIGHT to a mode both cameras natively support "
+                f"(e.g. 1280×800 @ 120 fps for QILOVE), then recalibrate."
+            )
+        if (w0, h0) != (config.WIDTH, config.HEIGHT):
+            # Cameras agreed but at a different size than config — calibration
+            # was done in config.WIDTH×HEIGHT, so the intrinsics are wrong now.
+            print(f"[capture] WARNING: cameras deliver {w0}×{h0} but config "
+                  f"asked for {config.WIDTH}×{config.HEIGHT}. Recalibrate, or "
+                  f"set config.WIDTH/HEIGHT to {w0}/{h0} and recalibrate.")
+        else:
+            print(f"[capture] Both cameras delivering {w0}×{h0} ✓")
+
         self._running = True
 
-        threading.Thread(target=self._capture, args=(self._cap0, self._buf0), daemon=True).start()
-        threading.Thread(target=self._capture, args=(self._cap1, self._buf1), daemon=True).start()
+        threading.Thread(target=self._capture, args=(self._cap0, self._buf0, 0), daemon=True).start()
+        threading.Thread(target=self._capture, args=(self._cap1, self._buf1, 1), daemon=True).start()
         threading.Thread(target=self._pair_loop, daemon=True).start()
 
     def stop(self) -> None:
@@ -118,13 +168,20 @@ class StereoCapturer:
 
     # ── Internal threads ──────────────────────────────────────────────────────
 
-    def _capture(self, cap: cv2.VideoCapture, buf: Deque) -> None:
+    def _capture(self, cap: cv2.VideoCapture, buf: Deque, cam_idx: int) -> None:
         """Per-camera capture loop. Runs in its own thread."""
+        t0 = time.monotonic()
+        n = 0
         while self._running:
             ok, frame = cap.read()
             if not ok:
                 continue
             ts = time.monotonic()
+            n += 1
+            if ts - t0 >= 2.0:
+                self._fps[cam_idx] = n / (ts - t0)
+                n = 0
+                t0 = ts
             with self._lock:
                 buf.append((ts, frame))
             self._new_frame.set()
@@ -157,7 +214,10 @@ class StereoCapturer:
             right=f1,
             timestamp=(ts0 + ts1) / 2.0,
         )
-        self._on_pair(pair)
+        try:
+            self._on_pair(pair)
+        except Exception:
+            pass  # never let a crashing callback kill the pair loop
 
 
 class SpinCapturer:

@@ -53,7 +53,9 @@ export function SimulatorFrame({ visible }: { visible: boolean }): React.ReactEl
         >
           {activeSwing.ball.pitch
             ? `↺  ${activeSwing.ball.pitch.releaseSpeedMph.toFixed(1)} mph pitch`
-            : `↺  ${activeSwing.ball.exitVelocity.toFixed(1)} mph / ${activeSwing.ball.launchAngle.toFixed(0)}°`}
+            : activeSwing.ball.radarOnly
+              ? `↺  ${activeSwing.ball.exitVelocity.toFixed(1)} mph`
+              : `↺  ${activeSwing.ball.exitVelocity.toFixed(1)} mph / ${activeSwing.ball.launchAngle.toFixed(0)}°`}
         </button>
       )}
     </div>

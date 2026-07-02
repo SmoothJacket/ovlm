@@ -24,9 +24,9 @@ const ROLL  = 3;   // rolling-average window
 // Reference lines shown on the chart
 const REFS = [
   { ev: 80,  label: '80',  color: '#1e2a1e' },
-  { ev: 90,  label: '90',  color: '#1a2830', labelColor: '#334' },
-  { ev: 100, label: '100', color: '#1e2020', labelColor: '#334' },
-  { ev: 110, label: '110', color: '#221a10', labelColor: '#445' },
+  { ev: 90,  label: '90',  color: '#1a2830', labelColor: '#e0e4ec' },
+  { ev: 100, label: '100', color: '#1e2020', labelColor: '#e0e4ec' },
+  { ev: 110, label: '110', color: '#221a10', labelColor: '#d0d4dc' },
 ];
 
 function rollingAvg(evs: number[], i: number): number {
@@ -103,7 +103,7 @@ export function EVChart(): React.ReactElement {
     trnd.dir === 'up'   ? `↑ +${trnd.delta.toFixed(1)}` :
     trnd.dir === 'down' ? `↓ ${trnd.delta.toFixed(1)}`  : '→ flat';
   const trendColor =
-    trnd.dir === 'up' ? '#44ff88' : trnd.dir === 'down' ? '#ff4455' : '#556';
+    trnd.dir === 'up' ? '#44ff88' : trnd.dir === 'down' ? '#ff4455' : '#c0c4cc';
 
   const streak = currentStreak(swings, streakThreshold);
 
@@ -137,10 +137,10 @@ export function EVChart(): React.ReactElement {
               animation: newRecordId ? 'record-flash 3s ease-out forwards' : 'none',
             }}
           >
-            <div style={{ ...styles.statLabel, color: newRecordId ? '#ff6644' : '#334' }}>
+            <div style={{ ...styles.statLabel, color: newRecordId ? '#ff6644' : '#e0e4ec' }}>
               {newRecordId ? 'NEW RECORD' : 'ALL-TIME'}
             </div>
-            <div style={{ ...styles.statValue, color: newRecordId ? '#ff6644' : '#556' }}>
+            <div style={{ ...styles.statValue, color: newRecordId ? '#ff6644' : '#c0c4cc' }}>
               {fmtEv(allTimeBest, evUnit)}<span style={styles.statUnit}> {evUnit}</span>
             </div>
           </div>
@@ -170,12 +170,12 @@ export function EVChart(): React.ReactElement {
             <line
               x1={PAD.left} x2={PAD.left + plotW}
               y1={yOf(r.ev)} y2={yOf(r.ev)}
-              stroke={r.labelColor ?? '#223'} strokeWidth={0.5} strokeDasharray="3,4"
+              stroke={r.labelColor ?? '#e8ecf4'} strokeWidth={0.5} strokeDasharray="3,4"
             />
             <text
               x={PAD.left - 6} y={yOf(r.ev) + 4}
               textAnchor="end" fontSize={9}
-              fill={r.labelColor ?? '#334'}
+              fill={r.labelColor ?? '#e0e4ec'}
             >
               {r.label}
             </text>
@@ -268,7 +268,7 @@ export function EVChart(): React.ReactElement {
 }
 
 function Stat({
-  label, value, unit, color = '#99aabb',
+  label, value, unit, color = '#888888',
 }: { label: string; value: string; unit: string; color?: string }) {
   return (
     <div style={styles.statBox}>
@@ -300,14 +300,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 8,
     fontWeight: 700,
     letterSpacing: '0.12em',
-    color: '#334',
+    color: '#e0e4ec',
     marginBottom: 1,
   },
   statValue: {
     fontSize: 15,
     fontWeight: 700,
     fontVariantNumeric: 'tabular-nums',
-    color: '#99aabb',
+    color: '#888888',
   },
   statUnit: {
     fontSize: 9,

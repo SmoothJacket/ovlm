@@ -499,6 +499,28 @@ input[type=number] { width: 70px; padding: 2px 6px; }
         <div class="text-sm font-bold" style="color:#fb923c" id="mDepth">--</div>
       </div>
     </div>
+    <!-- Hit spin readout — shown only when Magnus spin is measured -->
+    <div id="hmSpinPanel" class="bg-slate-800 rounded-lg p-2.5 border border-slate-700" style="display:none">
+      <div class="metric-label text-slate-400 mb-1.5">SPIN</div>
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <div>
+          <div class="text-xs text-slate-500">Backspin</div>
+          <div class="text-sm font-bold" id="hmBackspin" style="color:#34d399">--</div>
+          <div class="text-xs text-slate-600">rpm</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Sidespin</div>
+          <div class="text-sm font-bold" id="hmSidespin" style="color:#38bdf8">--</div>
+          <div class="text-xs text-slate-600" id="hmSidespinDir">rpm</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Total</div>
+          <div class="text-sm font-bold text-white" id="hmSpinTotal">--</div>
+          <div class="text-xs text-slate-600">rpm</div>
+        </div>
+      </div>
+      <div class="text-xs text-slate-600 mt-1.5 text-center" id="hmSpinSrc">trajectory · Magnus</div>
+    </div>
     <!-- Game State -->
     <div id="gameStatePanel" class="bg-slate-800 rounded-lg p-3 border border-slate-700">
       <div class="flex items-center justify-between mb-1.5">
@@ -536,6 +558,20 @@ input[type=number] { width: 70px; padding: 2px 6px; }
   <!-- Pitch Metrics -->
   <div id="pitchMetrics" class="sec flex flex-col gap-2" style="display:none">
     <div class="text-xs text-slate-400 tracking-widest">PITCH METRICS</div>
+    <!-- Strike zone canvas — catcher's view showing where the pitch crossed the plate -->
+    <div class="flex gap-3">
+      <canvas id="pitchLocCv" width="224" height="296"
+        style="width:112px;height:148px;flex-shrink:0;background:#0b1220;border:1px solid #1e293b;border-radius:6px"></canvas>
+      <div class="flex flex-col gap-1.5 flex-1 justify-center">
+        <div class="text-xs text-slate-500 leading-tight">Catcher's view · front of plate</div>
+        <div id="pitchLocLabel" class="text-sm font-bold" style="color:#2dd4bf">--</div>
+        <div class="flex gap-3 text-xs">
+          <span><span style="color:#34d399">●</span> Strike</span>
+          <span><span style="color:#f87171">●</span> Ball</span>
+        </div>
+        <div class="text-xs text-slate-600 mt-1">Last 20 pitches shown</div>
+      </div>
+    </div>
     <div class="grid grid-cols-2 gap-2">
       <div class="bg-slate-800 rounded-lg p-2.5 border border-slate-700">
         <div class="metric-label text-slate-400">Plate Ht</div>
@@ -3183,6 +3219,8 @@ function updateStrikeZoneForPlayer() {
   const zh = zoneTop - zoneBot, zc = (zoneTop + zoneBot) / 2;
   [szFill, szEdges].forEach(m => { m.scale.y = zh / SZ_H; m.position.y = zc; });
   kneeBar.position.y = zoneBot;
+  // Redraw pitch zone canvas with updated zone bounds (defined later in same script)
+  if (pitchLocHistory && pitchLocHistory.length > 0) drawPitchLocCanvas(null, null);
 }
 
 // ── CONTACT POINT (where in the zone + how deep the ball was struck) ─────────
@@ -3240,6 +3278,123 @@ function drawZoneCanvas() {
   const z = zoneNumber(contact.side, contact.ht);
   const lbl = document.getElementById('ctZoneLbl');
   if (lbl) lbl.textContent = (z ? 'ZONE ' + z : 'OUT OF ZONE') + ' · ' + battingSide() + 'HH';
+}
+
+// ── PITCH LOCATION CANVAS ────────────────────────────────────────────────────
+// Draws a catcher's-view strike zone showing where each pitch crossed the front
+// of home plate. Up to 20 pitches are stored; the most recent is highlighted.
+// Coordinates: xFt = lateral feet from center (+= first-base/right side from
+// catcher's view), yFt = height above ground in feet.
+const PLC_W = 112, PLC_H = 148;  // CSS px (canvas is 2× for HiDPI)
+// Map feet → canvas pixels (same view window as hit zone canvas)
+const plcX = xFt  => PLC_W / 2 + (xFt * 12) * (PLC_W / 32);   // ±16 in view
+const plcY = yFt  => PLC_H - 10 - (yFt - 0.6) * ((PLC_H - 20) / 4.2);
+
+const pitchLocHistory = [];   // [{x, y, strike}], max 20
+
+function drawPitchLocCanvas(xFt, yFt) {
+  const cv = document.getElementById('pitchLocCv');
+  if (!cv) return;
+
+  // Store this pitch in history
+  if (xFt != null && yFt != null) {
+    const strike = Math.abs(xFt) <= SZ_W / 2 && yFt >= zoneBot && yFt <= zoneTop;
+    pitchLocHistory.push({ x: xFt, y: yFt, strike });
+    if (pitchLocHistory.length > 20) pitchLocHistory.shift();
+  }
+
+  const g = cv.getContext('2d');
+  g.setTransform(2, 0, 0, 2, 0, 0);
+
+  // Background
+  g.fillStyle = '#0b1220';
+  g.fillRect(0, 0, PLC_W, PLC_H);
+
+  // Plate front-edge width marker (17") at the bottom
+  g.strokeStyle = '#334155';
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(plcX(-8.5), PLC_H - 5);
+  g.lineTo(plcX( 8.5), PLC_H - 5);
+  g.stroke();
+  // Tick marks at plate edges
+  g.beginPath();
+  g.moveTo(plcX(-8.5), PLC_H - 8); g.lineTo(plcX(-8.5), PLC_H - 2);
+  g.moveTo(plcX( 8.5), PLC_H - 8); g.lineTo(plcX( 8.5), PLC_H - 2);
+  g.stroke();
+
+  // Strike zone box (player-height-scaled)
+  const hw = SZ_W * 12 / 2;
+  const x0 = plcX(-hw), x1 = plcX(hw);
+  const y0 = plcY(zoneTop), y1 = plcY(zoneBot);
+
+  // Zone fill
+  g.fillStyle = 'rgba(45,212,191,0.06)';
+  g.fillRect(x0, y0, x1 - x0, y1 - y0);
+
+  // Inner 3×3 grid lines
+  g.strokeStyle = 'rgba(45,212,191,0.25)';
+  g.lineWidth = 0.5;
+  for (let i = 1; i < 3; i++) {
+    const gx = x0 + (x1 - x0) * i / 3;
+    const gy = y0 + (y1 - y0) * i / 3;
+    g.beginPath(); g.moveTo(gx, y0); g.lineTo(gx, y1); g.stroke();
+    g.beginPath(); g.moveTo(x0, gy); g.lineTo(x1, gy); g.stroke();
+  }
+
+  // Zone border
+  g.strokeStyle = '#2dd4bf';
+  g.lineWidth = 1;
+  g.strokeRect(x0, y0, x1 - x0, y1 - y0);
+
+  // Height labels (top/bottom of zone)
+  g.fillStyle = '#334155';
+  g.font = '5px monospace';
+  g.textAlign = 'right';
+  g.fillText(zoneTop.toFixed(1) + "'", x0 - 2, y0 + 4);
+  g.fillText(zoneBot.toFixed(1) + "'", x0 - 2, y1 + 4);
+
+  // History dots (oldest first so newest renders on top)
+  for (let i = 0; i < pitchLocHistory.length; i++) {
+    const p   = pitchLocHistory[i];
+    const isLast = i === pitchLocHistory.length - 1;
+    const alpha  = 0.35 + 0.65 * (i / Math.max(pitchLocHistory.length - 1, 1));
+    const radius = isLast ? 5 : 3;
+    const px = plcX(p.x), py = plcY(p.y);
+
+    if (isLast) {
+      // Glow ring for the most recent pitch
+      g.strokeStyle = p.strike ? 'rgba(52,211,153,0.45)' : 'rgba(248,113,113,0.4)';
+      g.lineWidth = 1.5;
+      g.beginPath(); g.arc(px, py, 8, 0, Math.PI * 2); g.stroke();
+    }
+
+    g.globalAlpha = alpha;
+    g.fillStyle = p.strike ? '#34d399' : '#f87171';
+    g.beginPath(); g.arc(px, py, radius, 0, Math.PI * 2); g.fill();
+
+    if (isLast) {
+      // Cross-hair on latest pitch
+      g.globalAlpha = 0.9;
+      g.strokeStyle = p.strike ? '#34d399' : '#f87171';
+      g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(px - 10, py); g.lineTo(px + 10, py); g.stroke();
+      g.beginPath(); g.moveTo(px, py - 10); g.lineTo(px, py + 10); g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+
+  // Update the label
+  if (pitchLocHistory.length > 0) {
+    const last = pitchLocHistory[pitchLocHistory.length - 1];
+    const sideTxt = (last.x >= 0 ? '+' : '') + (last.x * 12).toFixed(1) + '"';
+    const lbl = document.getElementById('pitchLocLabel');
+    if (lbl) {
+      lbl.textContent = (last.strike ? 'STRIKE' : 'BALL') +
+        ' · Ht ' + last.y.toFixed(2) + " ft · " + sideTxt;
+      lbl.style.color = last.strike ? '#34d399' : '#f87171';
+    }
+  }
 }
 
 function syncContactUI(fromSliders) {
@@ -3408,18 +3563,53 @@ function applyExternalHit(m) {
   if (!extReady) { extQueue.push(m); return true; }
   const sa = parseFloat(m.sprayAngle ?? m.spray ?? 0) || 0;
 
-  // Spin: explicit backspin/sidespin win; otherwise decompose a measured spin
-  // vector (rpm + unit axis + efficiency) — vertical axis component = sidespin.
+  // Spin: explicit backspin/sidespin win; otherwise invert the measured spin
+  // axis using Magnus physics — F = axis × v_hat. Vertical component of F is
+  // backspin/topspin; horizontal component (toward 1B) is sidespin.
   let bs = parseFloat(m.backspin), ss = parseFloat(m.sidespin);
+  const hmPanel = document.getElementById('hmSpinPanel');
   if (!isFinite(bs)) {
-    if (m.spin && isFinite(m.spin.rpm)) {
-      const eff = isFinite(m.spin.efficiency) ? m.spin.efficiency : 0.9;
-      const transverse = m.spin.rpm * eff;
-      const axY = Array.isArray(m.spin.axis) ? (m.spin.axis[1] || 0) : 0;
-      if (!isFinite(ss)) ss = -transverse * axY;
-      bs = transverse * Math.sqrt(Math.max(0, 1 - axY * axY));
-    } else bs = 1800; // typical batted-ball backspin when unmeasured
-  }
+    if (m.spin && isFinite(m.spin.rpm) && Array.isArray(m.spin.axis)) {
+      const la_r = la * Math.PI / 180;
+      const sa_r = sa * Math.PI / 180;
+      const vx = Math.sin(sa_r) * Math.cos(la_r);
+      const vy = Math.sin(la_r);
+      const vz = Math.cos(sa_r) * Math.cos(la_r);
+      const [ax, ay, az] = m.spin.axis;
+      // Magnus force direction = spin_axis × v_hat (world frame +Z = toward outfield)
+      const Fx = ay*vz - az*vy;   // +X = toward 1B → sidespin
+      const Fy = az*vx - ax*vz;   // +Y = up → backspin/lift
+      const Fz = ax*vy - ay*vx;
+      const FMag = Math.sqrt(Fx*Fx + Fy*Fy + Fz*Fz);
+      // Decompose: rpm × component fraction gives equivalent pure spin rate
+      bs = FMag > 0.01 ? Math.round(m.spin.rpm * Fy) : 0;
+      if (!isFinite(ss)) ss = FMag > 0.01 ? Math.round(m.spin.rpm * Fx) : 0;
+      // Update the hit spin display panel
+      if (hmPanel) {
+        const backEl = document.getElementById('hmBackspin');
+        const sideEl = document.getElementById('hmSidespin');
+        const dirEl  = document.getElementById('hmSidespinDir');
+        const totEl  = document.getElementById('hmSpinTotal');
+        const srcEl  = document.getElementById('hmSpinSrc');
+        const backRpm = Math.round(m.spin.rpm * Fy);
+        const sideRpm = Math.round(m.spin.rpm * Fx);
+        if (backEl) {
+          backEl.textContent = Math.abs(backRpm).toLocaleString();
+          backEl.style.color = backRpm >= 0 ? '#34d399' : '#f87171';
+          backEl.parentElement.querySelector('.text-xs.text-slate-500').textContent =
+            backRpm >= 0 ? 'Backspin' : 'Topspin';
+        }
+        if (sideEl) sideEl.textContent = Math.abs(sideRpm).toLocaleString();
+        if (dirEl)  dirEl.textContent  = sideRpm > 50 ? '→ 1B' : sideRpm < -50 ? '→ 3B' : 'rpm';
+        if (totEl)  totEl.textContent  = Math.round(m.spin.rpm).toLocaleString();
+        if (srcEl)  srcEl.textContent  = 'trajectory · Magnus' + (m.spin.source ? ` (${m.spin.source})` : '');
+        hmPanel.style.display = '';
+      }
+    } else {
+      bs = 1800; // typical batted-ball backspin when unmeasured
+      if (hmPanel) hmPanel.style.display = 'none';
+    }
+  } else if (hmPanel) hmPanel.style.display = 'none';
   if (!isFinite(ss)) ss = 0;
 
   const setSlider = (id, valId, v, lo, hi) => {
@@ -3436,6 +3626,15 @@ function applyExternalHit(m) {
   // Cyan polyline of the actual measured 3-D points, if the launch monitor
   // sent them. Drawn alongside the orange simulated trail.
   showMeasuredTrajectory(m.trajectory);
+  // If the backend sent measured contact-point coordinates, update the zone
+  // canvas to show where the ball was hit (feet → inches for side axis).
+  if (m.contactXFt != null && m.contactYFt != null) {
+    const sideIn = m.contactXFt * 12;
+    contact.ht    = Math.min(4.6, Math.max(0.8, m.contactYFt));
+    contact.side  = Math.min(14,  Math.max(-14, sideIn));
+    contact.depth = 0;
+    syncContactUI(false);
+  }
   launch();
   return true;
 }
@@ -3501,6 +3700,7 @@ function applyExternalPitch(m) {
   launchPitch();
 
   // Inject OVLM's measured values ~800 ms after launch (sim finishes in <500 ms).
+  // Measured plate location overrides the sim's own physics for the zone canvas.
   if (m.plateSpeedMph != null) {
     setTimeout(() => {
       const setText = (id, val) => {
@@ -3513,6 +3713,20 @@ function applyExternalPitch(m) {
       setText('pm_ivb',    m.verticalBreakIn?.toFixed(1));
       setText('pm_vaa',    m.vaaDeg?.toFixed(1));
       setText('pm_time',   m.plateTimeS?.toFixed(3));
+      // Replace the sim-computed zone dot with the real measured plate location.
+      // Pop the last history entry (the sim estimate) so only one dot appears per pitch.
+      if (m.plateLocXFt != null && m.plateLocYFt != null) {
+        if (pitchLocHistory.length > 0) pitchLocHistory.pop();
+        drawPitchLocCanvas(m.plateLocXFt, m.plateLocYFt);
+        const inH = m.plateLocYFt >= zoneBot && m.plateLocYFt <= zoneTop;
+        const inX = Math.abs(m.plateLocXFt) <= SZ_W / 2;
+        const zone = (inH && inX) ? 'STRIKE' : 'BALL';
+        const zEl = document.getElementById('pm_zone');
+        if (zEl) {
+          zEl.textContent = zone;
+          zEl.className = 'metric-val ' + (zone === 'STRIKE' ? 'outcome-2b' : 'outcome-out');
+        }
+      }
     }, 800);
   }
 
@@ -4299,6 +4513,9 @@ function stepPitchPhysics() {
     zEl.textContent = zone;
     zEl.className = 'metric-val ' + (zone==='STRIKE' ? 'outcome-2b' : 'outcome-out');
 
+    // Draw the pitch location in the strike zone canvas
+    drawPitchLocCanvas(pX, pH);
+
     landGroup.position.set(pX, Math.max(pH, 0), 0);
     landGroup.visible = true;
     document.getElementById('hud').textContent =
@@ -4323,11 +4540,15 @@ function setMode(mode) {
     trailLine.material.color.set(0x38bdf8);
     trailGlowMat.color.set(0x88ddff);
     tracerMat.color.set(0x44ddff);
+    // Draw the zone canvas blank (or with existing history) when entering pitch mode
+    drawPitchLocCanvas(null, null);
     flyTo('batter');
   } else {
     trailLine.material.color.set(0xff7700);
     trailGlowMat.color.set(0xffcc44);
     tracerMat.color.set(0xffee22);
+    const hmPanel = document.getElementById('hmSpinPanel');
+    if (hmPanel) hmPanel.style.display = 'none';
   }
 }
 

@@ -122,7 +122,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     gap: 4,
-    color: '#667',
+    color: '#b0b4bc',
     transition: 'all 0.15s',
   },
   navBtnActive: {

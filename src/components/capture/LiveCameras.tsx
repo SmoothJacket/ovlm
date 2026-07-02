@@ -10,10 +10,25 @@ interface CameraStream {
   frameRate?: number;
 }
 
-/** Enumerates whatever video input devices the browser can see and opens a
- * stream for each. There's no backend video feed (the Python pipeline
- * doesn't stream frames over the websocket) — this talks to the camera
- * hardware directly via getUserMedia, same as any other browser app. */
+// Labels that identify built-in or wireless cameras to skip.
+// OV9281s (and other USB cams) never match any of these.
+const BUILTIN_PATTERNS = [
+  /facetime/i,
+  /built.?in/i,
+  /iphone/i,
+  /ipad/i,
+  /continuity/i,
+  /virtual/i,   // OBS virtual camera, etc.
+  /obs/i,
+];
+
+function isBuiltIn(label: string): boolean {
+  return BUILTIN_PATTERNS.some((p) => p.test(label));
+}
+
+/** Enumerates USB video input devices and opens a stream for each.
+ * Built-in cameras (FaceTime, iPhone Continuity Camera, virtual cams)
+ * are excluded — only physically plugged-in cameras are opened. */
 function useCameraStreams(): { cameras: CameraStream[]; error: string | null } {
   const [cameras, setCameras] = useState<CameraStream[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +43,12 @@ function useCameraStreams(): { cameras: CameraStream[]; error: string | null } {
         // until a permission has been granted at least once.
         const probe = await navigator.mediaDevices.getUserMedia({ video: true });
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoInputs = devices.filter((d) => d.kind === 'videoinput');
-
         probe.getTracks().forEach((t) => t.stop());
+
+        const videoInputs = devices.filter(
+          (d) => d.kind === 'videoinput' && !isBuiltIn(d.label),
+        );
+
         if (cancelled) return;
 
         const opened: CameraStream[] = [];
@@ -80,7 +98,7 @@ export function LiveCameras(): React.ReactElement {
       <div style={styles.grid}>
         {cameras.length === 0 && !error && (
           <div style={styles.cell}>
-            <VideoCanvas stream={null} label="WAITING FOR CAMERA…" />
+            <VideoCanvas stream={null} label="NO USB CAMERAS DETECTED" />
           </div>
         )}
         {cameras.map((cam) => (
@@ -108,7 +126,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 700,
     letterSpacing: '0.1em',
-    color: '#667',
+    color: '#b0b4bc',
     marginBottom: 8,
   },
   grid: {

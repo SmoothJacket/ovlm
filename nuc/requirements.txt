@@ -4,6 +4,7 @@ websockets
 pyaudio
 pyserial
 psutil
+omnipresense
 
 # Optional — only needed to TRAIN or run the learned home-plate keypoint model
 # (plate_calib.py works without it via the classical detector):

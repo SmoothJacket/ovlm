@@ -5,12 +5,6 @@ import type { PiMessage } from '@/ws/messages';
 
 type MeasurementMsg = Extract<PiMessage, { type: 'measurement' }>;
 
-export interface AudioLevel {
-  rms: number;
-  peak: number;
-  threshold: number;
-}
-
 export interface PiHealth {
   cpuTempC:   number;
   memUsedMb:  number;
@@ -45,7 +39,6 @@ export interface SessionSlice {
   activeSwingId: string | null;
   pipelineStatus: PipelineStatus;
   wsHost: string;
-  audioLevel: AudioLevel | null;
   piHealth:   PiHealth | null;
   radarStatus: RadarStatus | null;
   calibrationProgress: CalibrationProgress | null;
@@ -58,7 +51,6 @@ export interface SessionSlice {
   ingestPiMeasurement: (msg: MeasurementMsg) => void;
   setWsHost: (host: string) => void;
   clearSwings: () => void;
-  updateAudioLevel: (level: AudioLevel) => void;
   updatePiHealth:   (health: PiHealth) => void;
   updateRadarStatus:(status: Omit<RadarStatus, 'receivedAt'>) => void;
   updateCalibrationProgress: (progress: CalibrationProgress) => void;
@@ -69,7 +61,6 @@ const defaultPipelineStatus: PipelineStatus = {
   state: 'idle',
   wsConnected: false,
   latencyMs: 0,
-  audioArmed: false,
 };
 
 const STORAGE_KEY_HOST   = 'ovlm_pi_host';
@@ -89,7 +80,6 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
   activeSwingId: null,
   pipelineStatus: defaultPipelineStatus,
   wsHost: loadWsHost(),
-  audioLevel: null,
   piHealth:   null,
   radarStatus: null,
   calibrationProgress: null,
@@ -136,11 +126,14 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
         processingLatencyMs: msg.latencyMs,
         detectRate: msg.detectRate,
         evSource: msg.evSource,
+        radarOnly: msg.radarOnly ?? false,
         radarVelocityMph: msg.radarVelocityMps != null
           ? Math.round(msg.radarVelocityMps * 2.23694 * 10) / 10
           : null,
         pitchVelocityMph: msg.pitchVelocity ?? null,
         carryDistanceM:   msg.carryDistanceM ?? null,
+        contactXFt: msg.contactXFt,
+        contactYFt: msg.contactYFt,
         trajectory: msg.trajectory.map((p) => ({
           x: p.x, y: p.y, z: p.z,
           timestamp: p.t * 1_000_000,
@@ -164,13 +157,19 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
           activeSpinPct:      msg.pitch.active_spin_pct,
         } : null,
       };
+      // Tag the swing with whatever sub-session is currently active.
+      // Cast through unknown because DrillSessionSlice is composed in the
+      // root store but not visible to this individual slice creator.
+      const drillState = s as unknown as { activeSubSession?: { id: string; type: import('@/types/pipeline').SubSessionType } | null };
       const session: SwingSession = {
         id: crypto.randomUUID(),
         timestamp: Date.now(),
         ball,
         hasReplayFrames: false,
+        subSessionId:   drillState.activeSubSession?.id,
+        subSessionType: drillState.activeSubSession?.type,
       };
-      const isRecord = ball.exitVelocity > s.allTimeBestEv;
+      const isRecord = !ball.pitch && ball.exitVelocity > s.allTimeBestEv;
       if (isRecord) {
         localStorage.setItem(STORAGE_KEY_ATR, String(ball.exitVelocity));
       }
@@ -196,7 +195,6 @@ export const createSessionSlice: StateCreator<SessionSlice> = (set) => ({
 
   clearSwings: () => set({ swings: [], activeSwingId: null }),
 
-  updateAudioLevel: (level)  => set({ audioLevel: level }),
   updatePiHealth:   (health) => set({ piHealth: health }),
   updateRadarStatus: (status) =>
     set({ radarStatus: { ...status, receivedAt: Date.now() } }),

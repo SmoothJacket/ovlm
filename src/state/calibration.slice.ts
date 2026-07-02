@@ -27,6 +27,10 @@ export interface CalibrationSlice {
   heightIn: number;
   distFt: number;
   distIn: number;
+  radarBehindFt: number;
+  radarBehindIn: number;
+  radarHeightFt: number;
+  radarHeightIn: number;
   lastFrame: CalibFrame | null;
   lastCalibResult: CalibWizardResult | null;
 
@@ -37,6 +41,7 @@ export interface CalibrationSlice {
   resetCapturedFrames: () => void;
   setWizardStep: (step: 0 | 1 | 2 | 3) => void;
   setCalibMeasurements: (h: { ft: number; in: number }, d: { ft: number; in: number }) => void;
+  setRadarPosition: (behind: { ft: number; in: number }, height: { ft: number; in: number }) => void;
   setLastFrame: (frame: CalibFrame) => void;
   setCalibWizardResult: (result: CalibWizardResult) => void;
   resetWizard: () => void;
@@ -52,6 +57,10 @@ export const createCalibrationSlice: StateCreator<CalibrationSlice> = (set) => (
   heightIn: 0,
   distFt: 8,
   distIn: 0,
+  radarBehindFt: 1,
+  radarBehindIn: 0,
+  radarHeightFt: 1,
+  radarHeightIn: 6,
   lastFrame: null,
   lastCalibResult: null,
 
@@ -85,6 +94,10 @@ export const createCalibrationSlice: StateCreator<CalibrationSlice> = (set) => (
 
   setCalibMeasurements: (h, d) =>
     set({ heightFt: h.ft, heightIn: h.in, distFt: d.ft, distIn: d.in }),
+
+  setRadarPosition: (behind, height) =>
+    set({ radarBehindFt: behind.ft, radarBehindIn: behind.in,
+          radarHeightFt: height.ft, radarHeightIn: height.in }),
 
   setLastFrame: (frame) => set({ lastFrame: frame }),
 

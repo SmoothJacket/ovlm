@@ -50,9 +50,59 @@ class LaunchMetrics:
     spray_angle_deg: float
     fit_residual_mm: float
     processing_latency_ms: float
+    # Camera-derived carry: launch state integrated forward to y=0 (ground).
+    carry_distance_m: float = 0.0
+    # Full launch state at τ=0 (the first inlier detection) — position in m,
+    # velocity in m/s, OVLM world frame (+X first base, +Y up, +Z toward pitcher).
+    # Exposed so pitch_metrics.py / future analytics can integrate forward
+    # to the plate or any other reference plane without redoing the fit.
+    release_x:  float = 0.0
+    release_y:  float = 0.0
+    release_z:  float = 0.0
+    vx0:        float = 0.0
+    vy0:        float = 0.0
+    vz0:        float = 0.0
+    # Magnus acceleration (m/s²) derived from trajectory curvature minus modelled drag.
+    # Zero when the fit has too few points for a quadratic term.
+    magnus_ax:  float = 0.0
+    magnus_ay:  float = 0.0
+    magnus_az:  float = 0.0
     trajectory: List[Point3D] = field(default_factory=list)
     points_used: int = 0
     points_rejected: int = 0
+
+
+def _integrate_carry(
+    x0: float, y0: float, z0: float,
+    vx: float, vy: float, vz: float,
+    magnus_ax: float = 0.0,
+    magnus_ay: float = 0.0,
+    magnus_az: float = 0.0,
+    dt: float = 0.005,
+    max_t: float = 10.0,
+) -> float:
+    """Forward-integrate the ball under gravity + drag + Magnus from the launch
+    state until it falls back through y=0 (ground level). Returns horizontal
+    distance travelled in metres. Magnus is treated as constant — valid for
+    the ~5 s carry window because spin rate decays slowly for a baseball."""
+    if vy <= 0 or y0 <= 0:
+        return 0.0
+    x, y, z = x0, y0, z0
+    t = 0.0
+    while y > 0 and t < max_t:
+        v = math.sqrt(vx * vx + vy * vy + vz * vz)
+        ax = -DRAG_K * v * vx + magnus_ax
+        ay = -config.GRAVITY_M_S2 - DRAG_K * v * vy + magnus_ay
+        az = -DRAG_K * v * vz + magnus_az
+        vx += ax * dt
+        vy += ay * dt
+        vz += az * dt
+        x  += vx * dt
+        y  += vy * dt
+        z  += vz * dt
+        t  += dt
+    # Horizontal distance from launch point to landing point
+    return math.sqrt((x - x0) ** 2 + (z - z0) ** 2)
 
 
 class TrajectoryFitter:
@@ -111,13 +161,36 @@ class TrajectoryFitter:
         resid = np.linalg.norm(obs_w - A @ coef, axis=1)
 
         # ── Launch metrics from fitted velocity at τ = 0 ─────────────────────
-        vx0, vy0, vz0 = coef[1]  # linear coefficients per axis
+        x0, y0, z0    = coef[0]   # constant term  → position at τ=0
+        vx0, vy0, vz0 = coef[1]   # linear term    → velocity at τ=0
         horiz_speed = math.sqrt(vx0 ** 2 + vz0 ** 2)
         total_speed = math.sqrt(vx0 ** 2 + vy0 ** 2 + vz0 ** 2)
 
         exit_vel_mph = total_speed * M_S_TO_MPH
         launch_angle = math.degrees(math.atan2(vy0, horiz_speed))
         spray_angle  = math.degrees(math.atan2(vx0, vz0))
+
+        # ── Magnus acceleration from trajectory curvature ─────────────────────
+        # The quadratic fit absorbs all non-gravity acceleration (drag + Magnus).
+        # Subtracting the modelled drag at τ=0 isolates the Magnus component,
+        # which is roughly constant over the short observation window.
+        # coef[2,:] are half-accelerations in the gravity-removed frame, so:
+        #   net_ax = 2·coef[2,0]
+        #   net_ay = 2·coef[2,1] − g   (gravity restored)
+        #   net_az = 2·coef[2,2]
+        magnus_ax = magnus_ay = magnus_az = 0.0
+        if degree == 2 and int(mask.sum()) >= _QUADRATIC_MIN_N and total_speed > 0:
+            drag_x = -DRAG_K * total_speed * float(vx0)
+            drag_y = -DRAG_K * total_speed * float(vy0)
+            drag_z = -DRAG_K * total_speed * float(vz0)
+            # Gravity cancels: the fitter removed ½gτ² from Y before fitting,
+            # so coef[2,1] already encodes the non-gravity acceleration; g does
+            # not appear in the residual when solving for Magnus.
+            magnus_ax = 2.0 * float(coef[2, 0]) - drag_x
+            magnus_ay = 2.0 * float(coef[2, 1]) - drag_y
+            magnus_az = 2.0 * float(coef[2, 2]) - drag_z
+
+        carry_m = _integrate_carry(x0, y0, z0, vx0, vy0, vz0, magnus_ax, magnus_ay, magnus_az)
 
         inlier_resid = resid[mask]
         residual_mm = float(np.sqrt(np.mean(inlier_resid ** 2))) * 1000.0
@@ -133,12 +206,21 @@ class TrajectoryFitter:
         # Only keep points travelling toward the pitcher (z ≥ 0)
         smoothed = [p for p in smoothed if p.z >= 0]
 
+        # Keep two decimals on speed/angle and three on metres — well below the
+        # noise floor (≈0.03 mph / 0.05° at typical triangulation accuracy) so
+        # the precision is real; the UI can round these for display.
         return LaunchMetrics(
-            exit_velocity_mph=round(exit_vel_mph, 1),
-            launch_angle_deg=round(launch_angle, 1),
-            spray_angle_deg=round(spray_angle, 1),
+            exit_velocity_mph=round(exit_vel_mph, 2),
+            launch_angle_deg=round(launch_angle, 2),
+            spray_angle_deg=round(spray_angle, 2),
             fit_residual_mm=round(residual_mm, 2),
             processing_latency_ms=round(latency_ms, 1),
+            carry_distance_m=round(carry_m, 3),
+            release_x=float(x0), release_y=float(y0), release_z=float(z0),
+            vx0=float(vx0), vy0=float(vy0), vz0=float(vz0),
+            magnus_ax=round(magnus_ax, 4),
+            magnus_ay=round(magnus_ay, 4),
+            magnus_az=round(magnus_az, 4),
             trajectory=smoothed,
             points_used=int(mask.sum()),
             points_rejected=int(len(points) - mask.sum()),

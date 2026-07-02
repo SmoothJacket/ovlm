@@ -19,8 +19,23 @@ export interface PipelineStatus {
   wsConnected: boolean;
   /** Last measured end-to-end latency in ms reported by Pi */
   latencyMs: number;
-  audioArmed: boolean;
   errorMessage?: string;
+}
+
+export type SubSessionType = 'tee' | 'front_toss' | 'live_bp';
+
+export interface SubSession {
+  id: string;
+  type: SubSessionType;
+  label: string;
+  startedAt: number;   // Unix ms
+  endedAt?: number;
+}
+
+export interface MasterSession {
+  id: string;
+  date: string;        // YYYY-MM-DD
+  startedAt: number;
 }
 
 export interface SwingSession {
@@ -29,6 +44,8 @@ export interface SwingSession {
   ball: BallMeasurement;
   biomech?: BiomechData;
   hasReplayFrames: boolean;
+  subSessionId?: string;
+  subSessionType?: SubSessionType;
 }
 
 /** Aggregated stats across selected sessions */

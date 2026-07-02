@@ -69,12 +69,19 @@ export interface BallMeasurement {
   detectRate: number;
   /** Which sensor provided the final exit velocity */
   evSource: 'camera' | 'radar';
+  /** Camera tracking failed — only radar EV is available; LA/SA/trajectory are absent */
+  radarOnly: boolean;
   /** Raw radar Doppler speed in mph, null if radar not active */
   radarVelocityMph: number | null;
   /** Pitch speed in mph from OPS243 inbound reading, null if no radar */
   pitchVelocityMph: number | null;
   /** Measured carry distance in metres from OPS243 FMCW, null if unavailable */
   carryDistanceM: number | null;
+  /** Ball position at τ=0 from the trajectory fit (feet).
+   *  Hits: lateral contact point (+X = first-base side), height.
+   *  Pitches: release point (use pitch.releaseHeightFt / releaseSideFt instead). */
+  contactXFt?: number;
+  contactYFt?: number;
   /** Trackman-style pitch metrics, present only when the trajectory was a
    *  pitch (ball travelling toward the plate). */
   pitch: PitchMetrics | null;

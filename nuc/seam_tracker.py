@@ -62,6 +62,42 @@ class _Sample:
     response:   float   # phaseCorrelate peak response (quality)
 
 
+class _SpinKalman:
+    """Scalar Kalman filter for angular velocity (rad/s).
+
+    Models spin rate as nearly constant (small process noise Q).
+    Measurement noise R_base is divided by the frame's phase-correlation
+    response so high-confidence frames contribute proportionally more.
+    """
+    __slots__ = ('_x', '_P', '_Q', '_R_base')
+
+    def __init__(self, Q: float = 2.0, R_base: float = 8000.0) -> None:
+        self._x:      Optional[float] = None
+        self._P:      float = 1e8   # large initial uncertainty → trust first measurement
+        self._Q:      float = Q
+        self._R_base: float = R_base
+
+    def update(self, z: float, weight: float = 1.0) -> None:
+        """Feed one measurement z (rad/s). weight ∈ (0,1] scales noise."""
+        R = self._R_base / max(weight, 0.05)
+        if self._x is None:
+            self._x = z
+            self._P = R
+            return
+        P_pred  = self._P + self._Q
+        K       = P_pred / (P_pred + R)
+        self._x = self._x + K * (z - self._x)
+        self._P = (1.0 - K) * P_pred
+
+    @property
+    def estimate(self) -> Optional[float]:
+        return self._x
+
+    @property
+    def std(self) -> float:
+        return math.sqrt(max(0.0, self._P))
+
+
 class SeamTracker:
     """
     Process frames one at a time with process_frame(), then call
@@ -114,36 +150,30 @@ class SeamTracker:
         if len(good) < MIN_FRAMES:
             return None
 
-        # Angular velocity (rad/s) per sample
-        ang_vels = np.array([s.angle_rad / s.dt for s in good])
-        weights   = np.array([s.response    for s in good])
-
-        # Weighted median — robust against occasional bad frames
-        omega = _weighted_median(ang_vels, weights)
-        confidence = float(np.mean(weights))
-
+        # Kalman-smooth angular velocity — each frame's phase-correlation
+        # response down-weights its measurement noise so high-quality frames
+        # dominate; low-quality frames nudge without corrupting the estimate.
+        kf = _SpinKalman()
+        for s in good:
+            kf.update(s.angle_rad / s.dt, weight=s.response)
+        omega = kf.estimate
+        if omega is None:
+            return None
+        confidence = float(np.mean([s.response for s in good]))
         rpm = abs(omega) * 60.0 / (2.0 * math.pi)
 
-        # ── Spin axis estimation ──────────────────────────────────────────────
-        # omega > 0 → CCW rotation in image → spin axis points toward camera (+Z)
-        # omega < 0 → CW  rotation in image → spin axis points away    (−Z)
-        # We add a small Y component (upward) as a Trackman-style convention
-        # placeholder; true 3D axis needs stereo or IMU fusion.
+        # omega > 0 → CCW → axis toward camera (+Z); omega < 0 → CW → away (−Z)
         sign = 1.0 if omega >= 0 else -1.0
-        raw_axis = np.array([0.0, 0.1 * sign, sign])   # mostly Z ± slight Y
+        raw_axis = np.array([0.0, 0.1 * sign, sign])
         spin_axis = raw_axis / np.linalg.norm(raw_axis)
 
-        # Spin efficiency: ratio of primary-axis spin to total. Without gyro
-        # data we use phase-correlation consistency as a proxy.
-        std_omega = float(np.std([s.angle_rad / s.dt for s in good]))
-        spin_efficiency = max(0.0, 1.0 - std_omega / (abs(omega) + 1e-9))
-        spin_efficiency = min(1.0, spin_efficiency)
+        # Spin efficiency proxy: how tightly the Kalman estimate converged.
+        # kf.std is the posterior standard deviation; lower → more consistent frames.
+        spin_efficiency = max(0.0, min(1.0, 1.0 - kf.std / (abs(omega) + 1e-9)))
 
         return SpinMeasurement(
             spin_rate_rpm=round(rpm, 0),
-            spin_axis=(round(float(spin_axis[0]), 3),
-                       round(float(spin_axis[1]), 3),
-                       round(float(spin_axis[2]), 3)),
+            spin_axis=tuple(round(float(x), 3) for x in spin_axis),
             spin_efficiency=round(spin_efficiency, 3),
             frames_analyzed=len(good),
             confidence=round(confidence, 3),
@@ -176,8 +206,26 @@ class SeamTracker:
         if len(good) < MIN_FRAMES:
             return None
 
-        total_angle = sum(s.angle_rad for s in good)
-        total_time  = sum(s.dt        for s in good)
+        # ── Pass 1: Kalman reference to reject outlier frames ─────────────────
+        # A single blurred or double-exposure frame can produce an angular
+        # velocity that is wildly wrong. Run Kalman first to establish a
+        # reference estimate + posterior std, then gate out frames beyond 3σ.
+        kf_ref = _SpinKalman()
+        for s in good:
+            kf_ref.update(s.angle_rad / s.dt, weight=s.response)
+        if kf_ref.estimate is None:
+            return None
+        ref_omega = kf_ref.estimate
+        # Gate: at least 15% of the mean rate so we don't gate out real
+        # transients on very low-std estimates.
+        sigma_gate = max(kf_ref.std * 3.0, abs(ref_omega) * 0.15)
+        inliers = [s for s in good if abs(s.angle_rad / s.dt - ref_omega) <= sigma_gate]
+        if len(inliers) < MIN_FRAMES:
+            inliers = good  # gate too tight — fall back to all frames
+
+        # ── Pass 2: Integration on inlier frames ──────────────────────────────
+        total_angle = sum(s.angle_rad for s in inliers)
+        total_time  = sum(s.dt        for s in inliers)
         if total_time <= 0:
             return None
 
@@ -201,7 +249,7 @@ class SeamTracker:
         true_omega = raw_omega / gyro_factor
         rpm_active = true_omega * 60.0 / (2.0 * math.pi)
 
-        confidence = float(np.mean([s.response for s in good]))
+        confidence = float(np.mean([s.response for s in inliers]))
 
         # ── Gyro angle estimation from crossing-rate variance ─────────────────
         # Pure transverse spin → constant frame-to-frame ω (low variance).
@@ -209,7 +257,7 @@ class SeamTracker:
         # each half revolution, creating sinusoidal modulation in apparent ω.
         # Empirical approximation: normalised std ≈ sin(gyro_angle) / √2.
         # gyro_angle: 0° = pure transverse (fastball backspin), 90° = pure gyro.
-        per_frame  = [s.angle_rad / s.dt for s in good]
+        per_frame  = [s.angle_rad / s.dt for s in inliers]
         std_v      = float(np.std(per_frame))
         mean_v_abs = abs(float(np.mean(per_frame)))
 
@@ -254,7 +302,7 @@ class SeamTracker:
             spin_rate_rpm   = round(rpm_total, 0),
             spin_axis       = refined_axis,
             spin_efficiency = round(active_fraction, 3),
-            frames_analyzed = len(good),
+            frames_analyzed = len(inliers),
             confidence      = round(confidence, 3),
             gyro_angle_deg  = round(gyro_angle_deg, 1),
         )

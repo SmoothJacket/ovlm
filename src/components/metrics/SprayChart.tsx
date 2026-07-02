@@ -99,10 +99,12 @@ export function SprayChart(): React.ReactElement {
   const activeSwing = useActiveSwing();
   const setActive   = useStore((s) => s.setActiveSwing);
 
-  const dots = swings.map((sw) => {
-    const [x, y] = landingFt(sw.ball.exitVelocity, sw.ball.launchAngle, sw.ball.sprayAngle);
-    return { sw, x, y };
-  });
+  const dots = swings
+    .filter((sw) => !sw.ball.radarOnly)
+    .map((sw) => {
+      const [x, y] = landingFt(sw.ball.exitVelocity, sw.ball.launchAngle, sw.ball.sprayAngle);
+      return { sw, x, y };
+    });
 
   // Clamp dots to within the outfield wall
   const clampedDots = dots.map(({ sw, x, y }) => {
@@ -293,7 +295,7 @@ export function SprayChart(): React.ReactElement {
         <span style={{ ...styles.legendItem, marginLeft: 'auto' }}>
           <EVColorBar />
           <span style={{ color: '#44aaff', marginLeft: 4 }}>60</span>
-          <span style={{ color: '#556', margin: '0 2px' }}>→</span>
+          <span style={{ color: '#c0c4cc', margin: '0 2px' }}>→</span>
           <span style={{ color: '#ff6600' }}>110+ mph</span>
         </span>
       </div>
@@ -340,11 +342,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     fontWeight: 700,
     letterSpacing: '0.15em',
-    color: '#445',
+    color: '#d0d4dc',
   },
   sub: {
     fontSize: 9,
-    color: '#334',
+    color: '#e0e4ec',
   },
   svg: {
     display: 'block',
@@ -358,7 +360,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '4px 10px 6px',
     borderTop: '1px solid #111',
     fontSize: 9,
-    color: '#445',
+    color: '#d0d4dc',
   },
   legendItem: {
     display: 'flex',

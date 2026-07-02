@@ -7,7 +7,7 @@ export function StatusBar(): React.ReactElement {
   const health   = useStore((s) => s.piHealth);
 
   const stateColor: Record<string, string> = {
-    idle:       '#445',
+    idle:       '#d0d4dc',
     calibrating:'#aa88ff',
     armed:      '#ffaa00',
     capturing:  '#ff4455',
@@ -22,7 +22,7 @@ export function StatusBar(): React.ReactElement {
   return (
     <div style={styles.bar}>
       {/* Pipeline state pill */}
-      <div style={{ ...styles.pill, background: stateColor[status.state] ?? '#445' }}>
+      <div style={{ ...styles.pill, background: stateColor[status.state] ?? '#d0d4dc' }}>
         {status.state.toUpperCase()}
       </div>
 
@@ -78,19 +78,6 @@ export function StatusBar(): React.ReactElement {
         </div>
       )}
 
-      {/* Audio armed indicator */}
-      <div style={{ marginLeft: health ? 0 : 'auto', display: 'flex', alignItems: 'center', gap: 6, paddingRight: 12 }}>
-        <div style={{
-          width: 8, height: 8, borderRadius: '50%',
-          background: status.audioArmed ? '#ff4455' : '#223',
-          boxShadow: status.audioArmed ? '0 0 6px #ff4455' : 'none',
-          transition: 'all 0.2s',
-        }} />
-        <span style={{ fontSize: 10, color: '#667', letterSpacing: '0.1em' }}>
-          {status.audioArmed ? 'ARMED' : 'AUDIO OFF'}
-        </span>
-      </div>
-
       {status.errorMessage && (
         <div style={styles.error}>{status.errorMessage}</div>
       )}
@@ -101,10 +88,10 @@ export function StatusBar(): React.ReactElement {
 function PiVital({ label, value, warn, crit }: {
   label: string; value: string; warn: boolean; crit: boolean;
 }) {
-  const color = crit ? '#ff4455' : warn ? '#ffaa00' : '#445';
+  const color = crit ? '#ff4455' : warn ? '#ffaa00' : '#d0d4dc';
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'baseline' }}>
-      <span style={{ fontSize: 8, color: '#334', letterSpacing: '0.08em' }}>{label}</span>
+      <span style={{ fontSize: 8, color: '#e0e4ec', letterSpacing: '0.08em' }}>{label}</span>
       <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', fontWeight: 600, color }}>{value}</span>
     </div>
   );
@@ -127,7 +114,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     fontWeight: 700,
     letterSpacing: '0.12em',
-    color: '#fff',
+    color: '#000',
   },
   metric: {
     display: 'flex',
@@ -136,13 +123,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   metricLabel: {
     fontSize: 9,
-    color: '#445',
+    color: '#d0d4dc',
     letterSpacing: '0.1em',
     fontWeight: 600,
   },
   metricValue: {
     fontSize: 12,
-    color: '#99aabb',
+    color: '#888888',
     fontWeight: 600,
     fontVariantNumeric: 'tabular-nums',
   },
